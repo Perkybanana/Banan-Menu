@@ -1,5 +1,6 @@
 // These tests catch partial apply/delivery, permissive parsing, UTF-8 corruption and destructive failed reads.
 #include "../src/presets.h"
+#include "../src/fov_core.h"
 #include <windows.h>
 #include <cstdio>
 #include <cstdlib>
@@ -7,7 +8,7 @@
 #include <limits>
 using namespace presets;
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "%s:%d: %s\n", __func__, __LINE__, #x); std::exit(1); } } while (0)
-const Schema schema{{"GodMode", "Esp"}, {{"SpeedMult", .5f, 5.f}, {"Fov", 0.f, 130.f}}};
+const Schema schema{{"GodMode", "Esp"}, {{"SpeedMult", .5f, 5.f}, {"Fov", fov::MinAngle, fov::MaxAngle, true}}};
 Profile Example() { return {"Русский профиль", {{{"GodMode", false}, {"Esp", true}}, {{"SpeedMult", .5f}, {"Fov", 130.f}}}}; }
 std::string Fixture() {
     // Hand-authored v1 file: one UTF-8 profile, two toggles and two values, favorite and named kit.
@@ -121,6 +122,45 @@ void ActionsAndLimits() {
     s.kits.push_back(s.kits[0]); CHECK(Serialize(s, schema, bytes) != Error::Ok); s.kits.pop_back();
     s.profiles.push_back(s.profiles[0]); CHECK(Serialize(s, schema, bytes) != Error::Ok); s.profiles.pop_back();
 }
+void FovProfilesRejectBeforeAnyCallback() {
+    // Each fixture is otherwise complete and valid: the FOV alone decides acceptance.
+    int failures = 0;
+    for (const auto& [spelling, accepted] : std::vector<std::pair<std::string, bool>>{
+        {"0", true}, {"30", true}, {"49", true}, {"130", true},
+        {"1", false}, {"29", false}, {"29.999999999", false},
+        {"130.0000001", false}, {"nan", false}, {"inf", false}, {"-inf", false}}) {
+        auto bytes = Fixture(); bytes.replace(bytes.find("130\n"), 4, spelling + "\n");
+        Store parsed;
+        const bool parsedOk = Parse(bytes, schema, parsed) == Error::Ok;
+        if (parsedOk != accepted) {
+            std::fprintf(stderr, "FOV %s: parsing acceptance was %d, expected %d\n", spelling.c_str(), parsedOk, accepted);
+            ++failures;
+        }
+        if (parsedOk && accepted) {
+            std::string saved; Store restored;
+            CHECK(Serialize(parsed, schema, saved) == Error::Ok);
+            CHECK(Parse(saved, schema, restored) == Error::Ok);
+            CHECK(restored.profiles[0].settings.values.at("Fov") == std::stof(spelling));
+        }
+    }
+    for (float angle : {0.f, 30.f, 49.f, 130.f, 1.f, 29.f, 130.1f,
+                       std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {
+        auto profile = Example(); profile.settings.values["Fov"] = angle;
+        const bool accepted = angle == 0 || (std::isfinite(angle) && angle >= 30 && angle <= 130);
+        int callbacks = 0;
+        float appliedFov = -1;
+        const auto result = ApplyProfile(profile, schema,
+            [&](const auto&, bool) { ++callbacks; },
+            [&](const auto& key, float value) { ++callbacks; if (key == "Fov") appliedFov = value; });
+        if ((result == Error::Ok) != accepted || callbacks != (accepted ? 4 : 0)) {
+            std::fprintf(stderr, "FOV %g: apply result %d, callbacks %d; expected accepted %d\n",
+                         angle, int(result), callbacks, accepted);
+            ++failures;
+        }
+        CHECK(!accepted || appliedFov == angle);
+    }
+    CHECK(failures == 0);
+}
 void Persistence() {
     const auto folder = std::filesystem::current_path() / ("banan-presets-test-" + std::to_string(GetCurrentProcessId()));
     std::filesystem::create_directories(folder);
@@ -152,4 +192,4 @@ void Persistence() {
     Repository afterSuccess(path, schema); CHECK(afterSuccess.Load() == Error::Ok && afterSuccess.Data().profiles[0].name == "Changed");
     std::filesystem::remove(path); std::filesystem::remove(folder);
 }
-int main() { Parsing(); ActionsAndLimits(); Persistence(); std::puts("presets_test: strict parsing, UTF-8, bounds, explicit actions, persistence passed"); }
+int main() { Parsing(); ActionsAndLimits(); FovProfilesRejectBeforeAnyCallback(); Persistence(); std::puts("presets_test: strict parsing, UTF-8, bounds, FOV domain, explicit actions, persistence passed"); }

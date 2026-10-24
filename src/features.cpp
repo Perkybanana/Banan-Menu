@@ -2,6 +2,7 @@
 #include "achievements.h"
 #include "missions.h"
 #include "photo_core.h"
+#include "fov_core.h"
 #include "config.h"
 #include "lang.h"
 #include "log.h"
@@ -60,7 +61,7 @@ const ToggleInfo kToggles[ToggleCount] = {
 
 const ValueInfo kValues[ValueCount] = {
     {"DamageMult", 1, 1, 50}, {"SpeedMult", 1, 0.5f, 5}, {"JumpMult", 1, 1, 10},
-    {"TimeScale", 1, 0.1f, 4}, {"Fov", 0, 0, 130},       {"KillRadius", 20, 5, 100},
+    {"TimeScale", 1, 0.1f, 4}, {"Fov", 0, 0, fov::MaxAngle}, {"KillRadius", 20, 5, 100},
     {"EspRange", 80, 10, 300}, {"EspWorldRange", 30, 5, 150}, {"AimFov", 8, 1, 45},
 };
 
@@ -783,7 +784,7 @@ public:
         Vec p = position.Out<Vec>("ReturnValue");
         Rot r = rotation.Out<Rot>("ReturnValue");
         const float setting = g_value[Fov];
-        if (!std::isfinite(setting) || (setting != 0 && (setting < 30 || setting > 130))) return false;
+        if (!fov::ValidSetting(setting)) return false;
         pose = {{p.x, p.y, p.z}, {r.pitch, r.yaw, r.roll}, fov.Out<float>("ReturnValue"), setting != 0};
         return photo::Valid(pose);
     }
@@ -1695,7 +1696,7 @@ void Init()
     for (int t = 0; t < ToggleCount; t++) g_on[t] = cfg::GetInt("Toggles", kToggles[t].key, kToggles[t].def) != 0;
     for (int v = 0; v < ValueCount; v++) {
         g_value[v] = std::clamp(cfg::GetFloat("Values", kValues[v].key, kValues[v].def), kValues[v].min, kValues[v].max);
-        if (kValues[v].key == std::string("Fov") && g_value[v] < 30) g_value[v] = 0; // 0 = game default
+        if (v == Fov && !fov::ValidSetting(g_value[v])) g_value[v] = 0;
         s.lastValue[v] = kValues[v].def;
     }
     for (int i = 0; i < 3; i++) {
@@ -1722,7 +1723,8 @@ const presets::Schema& ProfileSchema()
     static const auto schema = [] {
         presets::Schema result;
         for (const auto& toggle : kToggles) result.toggles.emplace_back(toggle.key);
-        for (const auto& value : kValues) result.values.push_back({value.key, value.min, value.max});
+        for (int v = 0; v < ValueCount; ++v)
+            result.values.push_back({kValues[v].key, v == Fov ? fov::MinAngle : kValues[v].min, kValues[v].max, v == Fov});
         return result;
     }();
     return schema;

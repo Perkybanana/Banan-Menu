@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <string>
+#include "fov_core.h"
 
 namespace photo {
 struct Pose {
@@ -24,7 +25,7 @@ struct Backend {
 inline bool Valid(const Pose& pose) {
     for (double v : pose.position) if (!std::isfinite(v) || std::abs(v) > 100000000) return false;
     for (double v : pose.rotation) if (!std::isfinite(v) || std::abs(v) > 360000) return false;
-    return std::isfinite(pose.fov) && pose.fov >= 30 && pose.fov <= 130;
+    return fov::ValidAngle(pose.fov);
 }
 class Bookmarks {
 public:

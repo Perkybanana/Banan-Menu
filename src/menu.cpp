@@ -3,6 +3,7 @@
 #include "config.h"
 #include "esp.h"
 #include "features.h"
+#include "fov_core.h"
 #include "lang.h"
 #include "log.h"
 #include "overlay.h"
@@ -349,9 +350,9 @@ void SliderRow(Value v, const char* label, const char* fmt, const feat::Snapshot
     ImGui::SameLine(x0 + avail * 0.40f);
     resetLabel = T(resetLabel);
     ImGui::SetNextItemWidth(avail * 0.60f - ButtonWidth(resetLabel) - ImGui::GetStyle().ItemSpacing.x);
-    float lo = v == feat::Fov ? 50.f : info.min; // FOV: 0 = game default, below any usable value
+    float lo = v == feat::Fov ? fov::MinAngle : info.min; // Default button releases the FOV lock to 0.
     float val = feat::g_value[v];
-    const char* shown = v == feat::Fov && val < lo ? T("Game default") : fmt;
+    const char* shown = v == feat::Fov ? fov::DisplayFormat(val, fmt, T("Game default")) : fmt;
     if (ImGui::SliderFloat("##v", &val, lo, info.max, shown, ImGuiSliderFlags_AlwaysClamp)) feat::g_value[v] = val;
     if (ImGui::IsItemDeactivatedAfterEdit()) feat::Save();
     ImGui::SameLine();

@@ -97,7 +97,8 @@ Error ValidateSettings(const Settings& values, const Schema& schema)
     for (const auto& key : schema.toggles) if (!values.toggles.contains(key)) return Error::InvalidSettings;
     for (const auto& spec : schema.values) {
         auto it = values.values.find(spec.key);
-        if (it == values.values.end() || !std::isfinite(it->second) || it->second < spec.min || it->second > spec.max)
+        if (it == values.values.end() || !std::isfinite(it->second) ||
+            (!(spec.allowZero && it->second == 0) && (it->second < spec.min || it->second > spec.max)))
             return Error::InvalidSettings;
     }
     return Error::Ok;
@@ -160,7 +161,8 @@ Error Parse(std::string_view bytes, const Schema& schema, Store& out)
             std::string key; double value = 0;
             if (!r.Text(key) || !r.Number(value)) return Error::InvalidData;
             auto spec = std::find_if(schema.values.begin(), schema.values.end(), [&](const auto& v) { return v.key == key; });
-            if (spec == schema.values.end() || value < DecimalBoundary(spec->min) || value > DecimalBoundary(spec->max) ||
+            if (spec == schema.values.end() ||
+                (!(spec->allowZero && value == 0) && (value < DecimalBoundary(spec->min) || value > DecimalBoundary(spec->max))) ||
                 !p.settings.values.emplace(key, static_cast<float>(value)).second) return Error::InvalidSettings;
         }
         parsed.profiles.push_back(std::move(p));

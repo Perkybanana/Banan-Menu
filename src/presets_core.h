@@ -10,7 +10,8 @@
 namespace presets {
 constexpr size_t MaxFile = 256 * 1024, MaxNames = 16, MaxEntries = 32, MaxFavorites = 256;
 enum class Error { Ok, InvalidData, Schema, Limit, InvalidSettings, InvalidKit, Unavailable, Io, Protected };
-struct ValueSpec { std::string key; float min, max; };
+// allowZero adds the game-default sentinel without admitting values between zero and min.
+struct ValueSpec { std::string key; float min, max; bool allowZero = false; };
 struct Schema { std::vector<std::string> toggles; std::vector<ValueSpec> values; };
 struct Settings { std::map<std::string, bool> toggles; std::map<std::string, float> values; };
 struct Profile { std::string name; Settings settings; };

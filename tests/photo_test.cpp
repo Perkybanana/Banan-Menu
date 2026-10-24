@@ -87,15 +87,30 @@ void CorruptValuesAreRejected() {
     auto& corrupted = const_cast<Bookmark&>(book.Slots()[0]);
     corrupted.pose.rotation[1] = nan;
     CHECK(book.Restore(0, c) == Result::InvalidPose && c.writes == 1);
-    for (float fov : {30.f, 130.f}) {
-        c.pose = {{100000000, -100000000, 0}, {360000, -360000, 0}, fov};
+    for (float angle : {30.f, 49.f, 130.f}) {
+        c.pose = {{100000000, -100000000, 0}, {360000, -360000, 0}, angle, true};
         CHECK(book.Save(2, c) == Result::Saved);
+        c.pose = {};
+        CHECK(book.Restore(2, c) == Result::RestoreRequested && c.pose.fov == angle && c.pose.fovLocked);
     }
+}
+void FovDisplayShowsEveryLockedAngle() {
+    CHECK(std::string(fov::DisplayFormat(0, "%.0f degrees", "Game default")) == "Game default");
+    for (float angle : {30.f, 35.f, 49.f, 130.f}) {
+        CHECK(fov::ValidSetting(angle));
+        char shown[32];
+        std::snprintf(shown, sizeof(shown), fov::DisplayFormat(angle, "%.0f degrees", "Game default"), angle);
+        CHECK(std::string(shown) == std::to_string(int(angle)) + " degrees");
+    }
+    CHECK(fov::ValidSetting(0) && !fov::ValidAngle(0));
+    for (double invalid : {1., 29., 130.1, std::numeric_limits<double>::quiet_NaN(),
+                           std::numeric_limits<double>::infinity()}) CHECK(!fov::ValidSetting(invalid));
 }
 int main() {
     SaveRestoreAndDeleteAllSlots();
     RejectUnavailableAndWrongMapWithoutWrites();
     InvalidSlotsAndFailuresDoNotReplaceSavedPose();
     CorruptValuesAreRejected();
+    FovDisplayShowsEveryLockedAngle();
     puts("Photo bookmark tests passed");
 }
