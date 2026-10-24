@@ -63,6 +63,10 @@ struct Snapshot {
     std::vector<Named> objectivesActive, objectivesDone, checkpoints;
     std::string tracked;
     std::array<std::string, 3> slots; // "" = empty, else map name
+    bool photoReady = false;
+    std::string photoWhy, photoMessage;
+    std::array<std::string, 3> cameraBookmarks; // full map identity; session only
+    std::array<bool, 3> cameraBookmarkRestorable{};
 };
 Snapshot GetSnapshot();
 
@@ -115,6 +119,9 @@ void SetShopLevel(int level);
 void KillNearby();
 void SaveSlot(int slot);
 void LoadSlot(int slot);
+void SaveCameraBookmark(int slot);
+void RestoreCameraBookmark(int slot);
+void DeleteCameraBookmark(int slot);
 void TeleportCheckpoint(uint64_t index);
 void CompleteObjective(uint64_t fname);
 void UnlockPower(Power power);

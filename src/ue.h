@@ -45,14 +45,19 @@ template <class F> void ForEachInstance(const UClass* cls, F&& f) // live gamepl
 }
 
 struct Prop {
+    enum class Kind { Unknown, Float, Double, Struct, Object };
     int32_t offset = -1;
     uint8_t boolMask = 0;       // non-zero for bool properties (bitfields included)
     const void* inner = nullptr; // struct properties: the UScriptStruct; object properties: the class
+    Kind kind = Kind::Unknown;
+    int32_t elementSize = 0, arrayDim = 0;
+    bool Is(Kind expected, int32_t size) const { return bool(*this) && kind == expected && elementSize == size && arrayDim == 1; }
     explicit operator bool() const { return offset >= 0; }
 };
-Prop FindProp(const UClass* structOrClass, const char* name); // cached, walks the Super chain
+// New transient camera paths opt out of legacy caches; default callers keep their existing behavior.
+Prop FindProp(const UClass* structOrClass, const char* name, bool uncached = false); // walks the Super chain
 int32_t StructSize(const UClass* structOrClass);               // bytes of one instance
-UFunction* FindFunction(const UClass* cls, const char* name);  // cached, walks the Super chain
+UFunction* FindFunction(const UClass* cls, const char* name, bool uncached = false);
 
 // Typed access to a property by name. Returns nullptr when the property doesn't exist (feature greys out).
 template <class T> T* Member(UObject* obj, const char* name)
@@ -66,8 +71,8 @@ bool SetBool(UObject* obj, const char* name, bool value);
 // ProcessEvent with a parameter buffer built by name. Must run on the game thread (see RunOnGameThread).
 class Call {
 public:
-    Call(UObject* obj, const char* function);
-    Call(UObject* obj, const UClass* owner, const char* function); // owner's function (e.g. an interface obj implements)
+    Call(UObject* obj, const char* function, bool uncached = false);
+    Call(UObject* obj, const UClass* owner, const char* function, bool uncached = false); // owner's function
     explicit operator bool() const { return fn_ != nullptr; }
     Call& ArgRaw(int index, const void* data, size_t size); // a struct copied as is (its size from StructSize)
     template <class T> Call& Arg(const char* name, const T& v)
@@ -94,6 +99,7 @@ private:
     void* SlotAt(int index);
     UObject* obj_;
     UFunction* fn_ = nullptr;
+    bool uncached_ = false;
     std::string params_; // zeroed buffer of the function's parameter size
 };
 
@@ -103,6 +109,16 @@ struct Weak {
     int32_t index = -1;
     Weak() = default;
     explicit Weak(UObject* o);
+    UObject* Get() const;
+};
+
+// Strict generation reference for new camera mutations. Unsupported object-array layouts and
+// objects without an engine-assigned serial fail closed; never allocates or writes engine serials.
+struct GenerationRef {
+    UObject* obj = nullptr;
+    int32_t index = -1, serial = 0;
+    GenerationRef() = default;
+    explicit GenerationRef(UObject* o);
     UObject* Get() const;
 };
 

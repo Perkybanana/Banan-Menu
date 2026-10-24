@@ -447,11 +447,11 @@ UObject* FindObject(const char* name, const UClass* cls)
     return found;
 }
 
-Prop FindProp(const UClass* structOrClass, const char* name)
+Prop FindProp(const UClass* structOrClass, const char* name, bool uncached)
 {
     if (!structOrClass) return {};
     auto key = std::make_pair(static_cast<const void*>(structOrClass), std::string(name));
-    {
+    if (!uncached) {
         std::lock_guard lock(g_cacheMutex);
         if (auto it = g_props.find(key); it != g_props.end()) {
             if (it->second.owner.Get()) return it->second.value;
@@ -464,6 +464,12 @@ Prop FindProp(const UClass* structOrClass, const char* name)
             if (!NameEquals(f + off::FFieldName, name)) continue;
             prop.offset = Read<int32_t>(f, off::PropOffset);
             const void* fieldClass = Read<const void*>(f, off::FFieldClass);
+            prop.elementSize = Read<int32_t>(f, 0x34); // FProperty::ElementSize (engine ABI)
+            prop.arrayDim = Read<int32_t>(f, 0x30);
+            if (NameEquals(fieldClass, "FloatProperty")) prop.kind = Prop::Kind::Float;
+            else if (NameEquals(fieldClass, "DoubleProperty")) prop.kind = Prop::Kind::Double;
+            else if (NameEquals(fieldClass, "StructProperty")) prop.kind = Prop::Kind::Struct;
+            else if (NameEquals(fieldClass, "ObjectProperty")) prop.kind = Prop::Kind::Object;
             if (NameEquals(fieldClass, "BoolProperty")) { // FieldSize, ByteOffset, ByteMask, FieldMask
                 prop.offset += Read<uint8_t>(f, off::PropExtra + 1);
                 prop.boolMask = Read<uint8_t>(f, off::PropExtra + 2);
@@ -474,15 +480,15 @@ Prop FindProp(const UClass* structOrClass, const char* name)
         }
     }
     std::lock_guard lock(g_cacheMutex);
-    if (prop) g_props[key] = {Weak(reinterpret_cast<UObject*>(const_cast<UClass*>(structOrClass))), prop};
+    if (prop && !uncached) g_props[key] = {Weak(reinterpret_cast<UObject*>(const_cast<UClass*>(structOrClass))), prop};
     return prop;
 }
 
-UFunction* FindFunction(const UClass* cls, const char* name)
+UFunction* FindFunction(const UClass* cls, const char* name, bool uncached)
 {
     if (!cls) return nullptr;
     auto key = std::make_pair(static_cast<const void*>(cls), std::string(name));
-    {
+    if (!uncached) {
         std::lock_guard lock(g_cacheMutex);
         if (auto it = g_funcs.find(key); it != g_funcs.end()) {
             if (it->second.owner.Get())
@@ -495,7 +501,7 @@ UFunction* FindFunction(const UClass* cls, const char* name)
         for (auto* f = Read<const uint8_t*>(s, off::StructChildren); f && !found; f = Read<const uint8_t*>(f, off::UFieldNext))
             if (NameEquals(f + off::ObjName, name)) found = reinterpret_cast<UFunction*>(const_cast<uint8_t*>(f));
     std::lock_guard lock(g_cacheMutex);
-    if (found) g_funcs[key] = {Weak(reinterpret_cast<UObject*>(const_cast<UClass*>(cls))), Weak(reinterpret_cast<UObject*>(found))};
+    if (found && !uncached) g_funcs[key] = {Weak(reinterpret_cast<UObject*>(const_cast<UClass*>(cls))), Weak(reinterpret_cast<UObject*>(found))};
     return found;
 }
 
@@ -516,15 +522,15 @@ bool SetBool(UObject* obj, const char* name, bool value)
     return true;
 }
 
-Call::Call(UObject* obj, const char* function) : obj_(obj)
+Call::Call(UObject* obj, const char* function, bool uncached) : obj_(obj), uncached_(uncached)
 {
-    fn_ = obj ? FindFunction(ClassOf(obj), function) : nullptr;
+    fn_ = obj ? FindFunction(ClassOf(obj), function, uncached_) : nullptr;
     if (fn_) params_.assign(size_t(Read<int32_t>(fn_, off::StructSize)), '\0');
 }
 
-Call::Call(UObject* obj, const UClass* owner, const char* function) : obj_(obj)
+Call::Call(UObject* obj, const UClass* owner, const char* function, bool uncached) : obj_(obj), uncached_(uncached)
 {
-    fn_ = obj && owner ? FindFunction(owner, function) : nullptr;
+    fn_ = obj && owner ? FindFunction(owner, function, uncached_) : nullptr;
     if (fn_) params_.assign(size_t(Read<int32_t>(fn_, off::StructSize)), '\0');
 }
 
@@ -539,7 +545,7 @@ int32_t StructSize(const UClass* s) { return s ? Read<int32_t>(s, off::StructSiz
 
 void* Call::Slot(const char* name)
 {
-    Prop p = fn_ ? FindProp(reinterpret_cast<UClass*>(fn_), name) : Prop{};
+    Prop p = fn_ ? FindProp(reinterpret_cast<UClass*>(fn_), name, uncached_) : Prop{};
     return p ? params_.data() + p.offset : nullptr;
 }
 
@@ -564,6 +570,33 @@ bool Call::Run()
 Weak::Weak(UObject* o) : obj(o), index(o ? Read<int32_t>(o, off::ObjIndex) : -1) {}
 
 UObject* Weak::Get() const { return obj && ObjectAt(index) == obj ? obj : nullptr; }
+
+namespace {
+int32_t GenerationSerial(int32_t index)
+{
+    // Verified native weak-reference lookup for the supported engine ABI: 64K entries per
+    // chunk, 24-byte FUObjectItem, serial after object/flags/cluster. Other layouts fail closed.
+    if (g.itemSize != 24 || g.perChunk != 65536 || index < 0 || index >= ObjectCount() || !g.chunks) return 0;
+    const uint8_t* chunk = g.chunks[index / g.perChunk];
+    int32_t serial = 0;
+    if (!chunk || !SafeRead(chunk + size_t(index % g.perChunk) * g.itemSize + 16, &serial, sizeof(serial))) return 0;
+    return serial > 0 ? serial : 0;
+}
+}
+
+GenerationRef::GenerationRef(UObject* o)
+{
+    int32_t candidate = -1;
+    if (!o || !SafeRead(reinterpret_cast<uint8_t*>(o) + off::ObjIndex, &candidate, sizeof(candidate))) return;
+    if (ObjectAt(candidate) != o) return;
+    int32_t generation = GenerationSerial(candidate);
+    if (!generation) return;
+    obj = o; index = candidate; serial = generation;
+}
+UObject* GenerationRef::Get() const
+{
+    return obj && serial > 0 && GenerationSerial(index) == serial && ObjectAt(index) == obj ? obj : nullptr;
+}
 
 std::string FString::ToUtf8() const
 {

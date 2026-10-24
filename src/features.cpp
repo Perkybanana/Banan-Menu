@@ -1,6 +1,7 @@
 #include "features.h"
 #include "achievements.h"
 #include "missions.h"
+#include "photo_core.h"
 #include "config.h"
 #include "lang.h"
 #include "log.h"
@@ -124,6 +125,9 @@ struct State {
     std::vector<std::pair<Weak, uint8_t>> hiddenWidgets;
     std::map<UObject*, std::pair<int32_t, float>> enemyHealth; // object index + last health seen, to measure damage
     Weak camera;                            // free camera actor
+    GenerationRef photoCamera, photoController, photoPlayer, photoWorld;
+    photo::Bookmarks cameraBookmarks;
+    const char* photoMessage = "";
     Vec camPos{};
     uint64_t camAt = 0;
     float jumpZ = 0;
@@ -683,6 +687,10 @@ void StartFreeCam(UObject* pc, UObject* player, uint64_t now)
     }
     km::Log("Free camera: %s", cam ? "on" : "camera actor could not be spawned");
     s.camera = Weak(cam);
+    s.photoCamera = GenerationRef(cam);
+    s.photoController = GenerationRef(pc);
+    s.photoPlayer = GenerationRef(player);
+    s.photoWorld = GenerationRef(OuterOf(OuterOf(player)));
     s.camPos = t.pos;
     s.camAt = now;
 }
@@ -695,6 +703,7 @@ void StopFreeCam(UObject* pc, UObject* player)
     }
     Call(s.cmc.Get(), "SetMovementMode").Arg(0, MOVE_Walking).Arg(1, uint8_t(0)).Run();
     s.camera = {};
+    s.photoCamera = s.photoController = s.photoPlayer = s.photoWorld = {};
 }
 
 void MoveFreeCam(UObject* pc, UObject* player, uint64_t now)
@@ -708,6 +717,116 @@ void MoveFreeCam(UObject* pc, UObject* player, uint64_t now)
     Vec fwd, right;
     Rot rot = LookAxes(pc, fwd, right);
     Call(cam, "K2_SetActorLocationAndRotation").Arg(0, s.camPos).Arg(1, rot).Arg(2, false).Arg(4, true).Run();
+}
+
+// Includes the package and every outer: matching a short world name alone is insufficient.
+std::string PhotoMapIdentity(UObject* player)
+{
+    UObject* world = player ? OuterOf(OuterOf(player)) : nullptr;
+    if (!world || !IsA(world, FindClass("World"))) return {};
+    std::vector<UObject*> seen;
+    std::string path;
+    for (UObject* o = world; o; o = OuterOf(o)) {
+        if (seen.size() >= 32 || std::find(seen.begin(), seen.end(), o) != seen.end()) return {};
+        seen.push_back(o);
+        const std::string name = Name(o);
+        if (name.empty()) return {};
+        path = path.empty() ? name : name + "." + path;
+    }
+    return path;
+}
+
+UObject* PhotoObject(UObject* owner, const char* name, const char* className)
+{
+    const Prop prop = owner ? FindProp(ClassOf(owner), name, true) : Prop{};
+    if (!prop.Is(Prop::Kind::Object, sizeof(UObject*))) return nullptr;
+    UObject* object = nullptr;
+    if (!SafeRead(reinterpret_cast<uint8_t*>(owner) + prop.offset, &object, sizeof(object))) return nullptr;
+    object = GenerationRef(object).Get();
+    return object && !IsDefaultObject(object) && IsA(object, FindClass(className)) ? object : nullptr;
+}
+
+Call PhotoCall(UObject* object, const char* function) { return Call(object, function, true); }
+
+class PhotoCamera final : public photo::Backend {
+public:
+    const char* Why() const {
+        if (!g_on[FreeCam] || !s.applied[FreeCam]) return "Enable free camera first.";
+        UObject* pc = s.photoController.Get();
+        UObject* player = s.photoPlayer.Get();
+        UObject* camera = s.photoCamera.Get();
+        if (!pc || !player || !camera || pc != s.pc.Get() || player != s.player.Get() || camera != s.camera.Get() ||
+            PhotoObject(pc, "Pawn", "PlayerCharacter") != player || !s.photoWorld.Get() ||
+            OuterOf(OuterOf(player)) != s.photoWorld.Get())
+            return "Free camera lifetime unavailable. Re-enable free camera.";
+        if (!IsA(camera, FindClass("CameraActor")) || IsDefaultObject(camera)) return "Free camera unavailable.";
+        auto target = PhotoCall(pc, "GetViewTarget");
+        if (!target.Run() || target.Out<UObject*>("ReturnValue") != camera) return "Free camera is not the active view.";
+        UObject* component = PhotoObject(camera, "CameraComponent", "CameraComponent");
+        UObject* manager = PhotoObject(pc, "PlayerCameraManager", "PlayerCameraManager");
+        if (!component || !manager || !FindProp(ClassOf(component), "FieldOfView", true).Is(Prop::Kind::Float, sizeof(float)))
+            return "Camera field of view unavailable.";
+        if (!PhotoCall(camera, "K2_GetActorLocation") || !PhotoCall(camera, "K2_GetActorRotation") ||
+            !PhotoCall(camera, "K2_SetActorLocationAndRotation") || !PhotoCall(pc, "SetControlRotation") ||
+            !PhotoCall(pc, "FOV") || !PhotoCall(component, "SetFieldOfView") || !PhotoCall(manager, "GetFOVAngle"))
+            return "Camera bookmark API unavailable.";
+        return "";
+    }
+    bool Active() const override { return !*Why(); }
+    std::string Map() const override { return PhotoMapIdentity(s.photoPlayer.Get()); }
+    bool Read(photo::Pose& pose) override {
+        if (!Active()) return false;
+        UObject* camera = s.photoCamera.Get();
+        auto position = PhotoCall(camera, "K2_GetActorLocation"), rotation = PhotoCall(camera, "K2_GetActorRotation");
+        auto fov = PhotoCall(PhotoObject(s.photoController.Get(), "PlayerCameraManager", "PlayerCameraManager"), "GetFOVAngle");
+        if (!position.Run() || !rotation.Run() || !fov.Run()) return false;
+        Vec p = position.Out<Vec>("ReturnValue");
+        Rot r = rotation.Out<Rot>("ReturnValue");
+        const float setting = g_value[Fov];
+        if (!std::isfinite(setting) || (setting != 0 && (setting < 30 || setting > 130))) return false;
+        pose = {{p.x, p.y, p.z}, {r.pitch, r.yaw, r.roll}, fov.Out<float>("ReturnValue"), setting != 0};
+        return photo::Valid(pose);
+    }
+    bool Apply(const photo::Pose& pose) override {
+        if (!Active() || !photo::Valid(pose)) return false;
+        UObject* pc = s.photoController.Get();
+        UObject* camera = s.photoCamera.Get();
+        UObject* component = PhotoObject(camera, "CameraComponent", "CameraComponent");
+        const Vec p{pose.position[0], pose.position[1], pose.position[2]};
+        const Rot r{pose.rotation[0], pose.rotation[1], pose.rotation[2]};
+        // MoveFreeCam consumes controller rotation and camPos next tick. Update both paths.
+        if (!PhotoCall(pc, "SetControlRotation").Arg(0, r).Run()) return false;
+        auto move = PhotoCall(camera, "K2_SetActorLocationAndRotation");
+        if (!move.Arg(0, p).Arg(1, r).Arg(2, false).Arg(4, true).Run() || !move.Out<bool>("ReturnValue")) return false;
+        s.camPos = p;
+        s.camAt = GetTickCount64();
+        if (!PhotoCall(component, "SetFieldOfView").Arg(0, pose.fov).Run()) return false;
+        // The controller's explicit FOV lock wins over camera-component FOV. Restore that
+        // setting too: locked bookmarks use the measured angle, unlocked ones release it.
+        const float setting = pose.fovLocked ? pose.fov : 0.f;
+        if (!PhotoCall(pc, "FOV").Arg(0, setting).Run()) return false;
+        g_value[Fov] = setting;
+        s.lastValue[Fov] = setting;
+        return true; // dispatch accepted; the UI deliberately says requested
+    }
+};
+
+const char* PhotoMessage(photo::Result result)
+{
+    switch (result) {
+    case photo::Result::Saved: return "Camera bookmark saved for this session.";
+    case photo::Result::Deleted: return "Camera bookmark deleted.";
+    case photo::Result::RestoreRequested: return "Camera restore requested; check the view.";
+    case photo::Result::InvalidSlot: return "Invalid camera bookmark.";
+    case photo::Result::CameraUnavailable: return "Live free camera required; nothing restored.";
+    case photo::Result::MapUnavailable: return "Camera map unavailable; nothing restored.";
+    case photo::Result::Empty: return "Camera bookmark is empty.";
+    case photo::Result::WrongMap: return "Camera bookmark belongs to another map.";
+    case photo::Result::InvalidPose: return "Camera bookmark values are invalid.";
+    case photo::Result::ReadFailed: return "Could not read camera; bookmark unchanged.";
+    case photo::Result::ApplyFailed: return "Camera restore incomplete; check the view.";
+    }
+    return "";
 }
 
 UObject* EnemyAttributes(UObject* enemy) { return AttributeSet(enemy, "CharacterAttributeSet"); }
@@ -1451,6 +1570,7 @@ void Tick()
         s.maxDurability.clear();
         s.hiddenWidgets.clear();
         s.camera = {};
+        s.photoCamera = s.photoController = s.photoPlayer = s.photoWorld = {};
         std::fill(std::begin(s.applied), std::end(s.applied), false);
         for (int v = 0; v < ValueCount; v++) s.lastValue[v] = kValues[v].def; // re-apply values to the new pawn
         if (player) km::Log("Player found: %s", Name(player).c_str());
@@ -1489,6 +1609,16 @@ void Tick()
     if (!snap.reflection) snap.why.fill("Game engine not hooked: see BananMenu.log.");
     snap.cheatManager = CheatAvailable();
     for (int i = 0; i < 3; i++) snap.slots[i] = s.slotMap[i];
+    const PhotoCamera photoCamera;
+    snap.photoWhy = photoCamera.Why();
+    snap.photoReady = snap.reflection && snap.photoWhy.empty();
+    snap.photoMessage = s.photoMessage;
+    const std::string photoMap = snap.photoReady ? photoCamera.Map() : "";
+    for (int i = 0; i < 3; ++i) {
+        const auto& mark = s.cameraBookmarks.Slots()[i];
+        snap.cameraBookmarks[i] = mark.map;
+        snap.cameraBookmarkRestorable[i] = snap.photoReady && !mark.map.empty() && mark.map == photoMap;
+    }
 
     std::lock_guard lock(g_snapMutex);
     g_snap = std::move(snap);
@@ -1507,6 +1637,27 @@ EspFrame GetEspFrame()
 {
     std::lock_guard lock(g_espMutex);
     return g_esp;
+}
+
+void SaveCameraBookmark(int slot)
+{
+    RunOnGameThread([slot] {
+        PhotoCamera camera;
+        s.photoMessage = PhotoMessage(s.cameraBookmarks.Save(slot, camera));
+    });
+}
+
+void RestoreCameraBookmark(int slot)
+{
+    RunOnGameThread([slot] {
+        PhotoCamera camera;
+        s.photoMessage = PhotoMessage(s.cameraBookmarks.Restore(slot, camera));
+    });
+}
+
+void DeleteCameraBookmark(int slot)
+{
+    RunOnGameThread([slot] { s.photoMessage = PhotoMessage(s.cameraBookmarks.Delete(slot)); });
 }
 
 Snapshot GetSnapshot()
@@ -1529,6 +1680,8 @@ Snapshot GetSnapshot()
     // The tick never runs without the engine hooks: grey everything out here.
     if (!Ready()) {
         snap.reflection = false;
+        snap.photoReady = false;
+        snap.cameraBookmarkRestorable.fill(false);
         snap.why.fill("Game engine not hooked: see BananMenu.log.");
         snap.valueWhy.fill("Game engine not hooked: see BananMenu.log.");
         snap.powersWhy = "Game engine not hooked: see BananMenu.log.";

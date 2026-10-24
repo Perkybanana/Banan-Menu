@@ -839,6 +839,33 @@ void TabWorld(const feat::Snapshot& s)
     SliderRow(feat::Fov, "Field of view", "%.0f°", s, "Locks the camera field of view. Default gives control back to the game.",
               "Default");
     ToggleRow(feat::HideHUD, s);
+    Section("CAMERA BOOKMARKS");
+    Hint("Three session-only views. Enable free camera first. Restoring also restores the saved FOV lock setting.");
+    if (!s.photoReady && !s.photoWhy.empty()) ImGui::TextWrapped("%s", T(s.photoWhy.c_str()));
+    for (int i = 0; i < 3; ++i) {
+        ImGui::PushID(i);
+        RowHover(ImGui::GetCursorScreenPos(), ImGui::GetContentRegionAvail().x);
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text(T("Camera %d"), i + 1);
+        ImGui::SameLine(0, 12 * S());
+        ImGui::TextDisabled("%s", T(s.cameraBookmarks[i].empty() ? "empty" :
+            s.cameraBookmarkRestorable[i] ? "Current map" : "Saved view"));
+        SameLineRight(ButtonWidth(T("Save")) + ButtonWidth(T("Restore view")) + ButtonWidth(T("Delete view")) +
+                      2 * ImGui::GetStyle().ItemSpacing.x);
+        ImGui::BeginDisabled(!s.photoReady);
+        if (ImGui::Button(T("Save"))) feat::SaveCameraBookmark(i);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!s.cameraBookmarkRestorable[i]);
+        if (ImGui::Button(T("Restore view"))) feat::RestoreCameraBookmark(i);
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(s.cameraBookmarks[i].empty());
+        if (ImGui::Button(T("Delete view"))) feat::DeleteCameraBookmark(i);
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    }
+    if (!s.photoMessage.empty()) ImGui::TextWrapped("%s", T(s.photoMessage.c_str()));
     Section("LOCKS");
     ToggleRow(feat::AutoLockpick, s);
 }
