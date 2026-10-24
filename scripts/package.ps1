@@ -17,6 +17,9 @@ function Get-SafePath([string]$Value) {
     }
     if (-not [IO.Path]::IsPathRooted($Value)) { $Value = Join-Path (Get-Location).Path $Value }
     $full = [IO.Path]::GetFullPath($Value)
+    if ($full -notmatch '^[A-Za-z]:\\') {
+        throw 'Use a local drive-absolute filesystem path; network and device paths are not allowed.'
+    }
     if ($full.Substring(2).Contains(':')) { throw 'Alternate data streams are not package paths.' }
     $part = $full
     while ($part) {

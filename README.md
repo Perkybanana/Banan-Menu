@@ -36,7 +36,7 @@ ctest --test-dir build -C Release --output-on-failure
 powershell -NoProfile -File scripts/package.ps1 -BuildDirectory build -OutputDirectory packages
 ```
 
-The packager accepts only the normal Release DLL and the documentation/license allowlist. It produces `BananMenu-1.0.0-dev.1-win64.zip` and a JSON hash/size manifest with the source commit and candidate version. Existing targets cause a failure unless `-Force` is explicitly supplied. Compare the extracted DLL's SHA-256 with the manifest before installation. Build/test success is not in-game acceptance or proof of absence of all malicious code; the new candidate binary has not yet been scanned.
+The packager accepts only the normal Release DLL and the documentation/license allowlist. It produces `BananMenu-1.0.0-dev.1-win64.zip` and a JSON hash/size manifest with the source commit and candidate version. Existing targets cause a failure unless `-Force` is explicitly supplied. Compare the extracted DLL's SHA-256 with the manifest before installation. On 2026-10-24, the controller scanned the frozen DLL with SHA-256 `ea63783deb724251c1505faa657a0fcd0a214468d2e8458150cd4212cf750d8f` using Microsoft Defender: exit 0, no threats reported. This applies only to that exact binary, not future CI builds; it does not guarantee absence of all malicious code or establish in-game acceptance.
 
 The Windows workflow builds, tests and uploads a development artifact; it does not publish a GitHub Release. For contributions, keep game mutations on the game thread, render from copied snapshots, and add user-facing RU/EN text to `src/lang.cpp`. Run the build and tests above and describe the actual runtime verification performed.
 
