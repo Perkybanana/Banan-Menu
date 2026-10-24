@@ -11,7 +11,7 @@ This records the scope of 1.0.0-dev.1 development work as of 2026-10-24. It is n
 | Live-checkpoint teleport | Moves to an existing loaded checkpoint; not a complete story-state start. |
 | Independent full checkpoint pack | Not implemented, prepared or verified. |
 | Recoil, attack speed, hand visibility, enemy spawning, cut-item functionality | Deferred; no implemented-functionality claim. |
-| Frozen candidate binary | Controller scanned SHA-256 `ea63783deb724251c1505faa657a0fcd0a214468d2e8458150cd4212cf750d8f` with Microsoft Defender on 2026-10-24: exit 0, no threats reported. This covers only that exact DLL, not future CI builds. Offline tests and this scoped scan cannot guarantee absence of all malicious code or establish runtime acceptance. |
+| Recorded scan evidence (exact hash only) | Controller scanned SHA-256 `ea63783deb724251c1505faa657a0fcd0a214468d2e8458150cd4212cf750d8f` with Microsoft Defender on 2026-10-24: exit 0, no threats reported. This is historical evidence only for that exact DLL. Consult per-candidate release notes for the DLL being installed; a different hash or future CI build requires its own scan evidence. Offline tests and this scoped scan cannot guarantee absence of all malicious code or establish runtime acceptance. |
 
 The build's offline tests cover resource bounds, preset persistence/validation, proxy exports, achievement helpers, reflection-cache handling and camera bookmark/generation guards. They do not replace runtime acceptance. No game installation or saves are needed for these tests; the fake Steam DLL is an offline test fixture and is excluded from packages.
 
