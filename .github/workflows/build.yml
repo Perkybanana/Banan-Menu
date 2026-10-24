@@ -1,0 +1,32 @@
+name: Development build
+
+on:
+  push:
+    branches: [development]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Configure
+        run: cmake -S . -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release --parallel 1 -- /nodeReuse:false
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package development candidate
+        shell: pwsh
+        run: ./scripts/package.ps1 -BuildDirectory build -OutputDirectory packages
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: BananMenu-development-win64
+          path: |
+            packages/BananMenu-*-win64.zip
+            packages/BananMenu-*-win64.manifest.json
+          if-no-files-found: error

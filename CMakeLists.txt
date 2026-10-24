@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
-project(BananMenu VERSION 0.4.16 LANGUAGES C CXX ASM_MASM)
+project(BananMenu VERSION 1.0.0 LANGUAGES C CXX ASM_MASM)
+set(BANAN_VERSION "1.0.0-dev.1")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -42,7 +43,7 @@ target_include_directories(minhook PUBLIC ${minhook_SOURCE_DIR}/include)
 # The game statically imports winmm.dll, so a winmm.dll next to the exe is loaded at startup.
 add_library(BananMenu SHARED src/dllmain.cpp src/overlay.cpp src/menu.cpp src/ue.cpp src/features.cpp src/presets.cpp src/achievements.cpp src/missions.cpp src/esp.cpp src/lang.cpp src/resources.rc src/winmm_stubs.asm)
 set_target_properties(BananMenu PROPERTIES OUTPUT_NAME winmm)
-target_compile_definitions(BananMenu PRIVATE KM_VERSION="${PROJECT_VERSION}" WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_definitions(BananMenu PRIVATE KM_VERSION="${BANAN_VERSION}" WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(BananMenu PRIVATE $<$<COMPILE_LANGUAGE:C,CXX>:/W4 /utf-8>)
 option(KM_DUMPER "Dev build that loads Dumper-7.dll from the game folder (SDK re-dump after a patch)" OFF)
 if(KM_DUMPER)
