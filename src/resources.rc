@@ -1,0 +1,3 @@
+// Fonts embedded in the DLL (Inter, SIL Open Font License: see assets/fonts/Inter-OFL.txt).
+101 RCDATA "../assets/fonts/Inter-Regular.ttf"
+102 RCDATA "../assets/fonts/Inter-SemiBold.ttf"

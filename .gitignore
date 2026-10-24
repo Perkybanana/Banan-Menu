@@ -1,0 +1,13 @@
+build/
+_build/
+.superpowers/
+.worktrees/
+*.user
+*.suo
+*.log
+*.sav
+BananMenu.ini
+*.dll
+*.exe
+*.pdb
+*.zip
