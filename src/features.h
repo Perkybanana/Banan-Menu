@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "resources_core.h"
 
 namespace feat {
 
@@ -52,6 +53,7 @@ struct Snapshot {
     std::string map;
     float health = 0, maxHealth = 0, suffering = 0, maxSuffering = 0;
     int money = -1, shopLevel = -1;
+    std::array<int, resources::Count> resourceTotals{-1, -1, -1, -1, -1, -1};
     std::array<std::string, ToggleCount> why; // non-empty = unavailable, shown as tooltip
     std::array<std::string, ValueCount> valueWhy;
     std::array<bool, PowerCount> powers{}; // unlocked
@@ -102,6 +104,7 @@ void SetHealth(float value);
 void FillSuffering();
 void AddMoney(int delta);
 void GiveItem(const std::string& name, int count);
+void SetResourceTotal(int materialIndex, int total);
 void GiveAllSkins();
 void SetShopLevel(int level);
 void KillNearby();

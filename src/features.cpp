@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <mutex>
 
@@ -409,6 +410,166 @@ int ItemCount(UObject* item, bool withStash = false)
     Call c(ItemManager(), "GetItemCountInInventory");
     return c && c.Arg(0, s.player.Get()).Arg(1, item).Arg(2, false).Arg(3, withStash).Run() ? c.Out<int32_t>("ReturnValue")
                                                                                              : -1;
+}
+
+// This adapter only accesses the carried inventory. Native void calls are never treated as proof of success:
+// resources::Reconcile rereads the total after every operation, including failed calls.
+struct ResourceInventory final : resources::Backend, resources::StackWriter {
+    Weak player, manager, item, selected;
+    int selectedCount = 0;
+    ResourceInventory(UObject* owner, UObject* asset) : player(owner), manager(ItemManager()), item(asset) {}
+    bool HasParams(const char* function, std::initializer_list<const char*> names)
+    {
+        UObject* im = manager.Get();
+        if (!im) return false;
+        auto* fn = reinterpret_cast<const UClass*>(FindFunction(ClassOf(im), function));
+        if (!fn) return false;
+        for (const char* name : names) if (!FindProp(fn, name)) return false;
+        return true;
+    }
+    bool Run(Call& call)
+    {
+        bool ran = false;
+        std::function<void()> invoke = [&] { ran = call.Run(); };
+        return Guard(invoke) && ran;
+    }
+    bool CarriedStack(UObject* info)
+    {
+        bool inStash = true;
+        return info && player.Get() && item.Get() && IsA(info, FindClass("ItemInfoStackable")) &&
+            Ptr(info, "Item") == item.Get() && Ptr(info, "Owner") == player.Get() &&
+            GetBool(info, "bIsInStash", &inStash) && !inStash;
+    }
+    bool Read(int, int& total) override
+    {
+        UObject* owner = player.Get();
+        UObject* asset = item.Get();
+        Call count(manager.Get(), "GetItemCountInInventory");
+        if (!owner || !asset || !HasParams("GetItemCountInInventory", {"Owner", "Item", "bInStash", "bIncludeStash", "ReturnValue"}) || !count)
+            return false;
+        count.Arg("Owner", owner).Arg("Item", asset).Arg("bInStash", false).Arg("bIncludeStash", false);
+        if (!Run(count)) return false;
+        total = count.Out<int32_t>("ReturnValue");
+        return total >= 0;
+    }
+    bool CurrentStack(int, int& count) override
+    {
+        bool found = false;
+        return SelectStack(found) && found && ReadStack(count) && count > 0;
+    }
+    bool SelectStack(bool& found) override
+    {
+        found = false;
+        selected = {};
+        UObject* owner = player.Get();
+        UObject* asset = item.Get();
+        Call get(manager.Get(), "GetItemFromInventory");
+        if (!owner || !asset || !HasParams("GetItemFromInventory", {"Owner", "Item", "bIncludeStash", "ReturnValue"}) || !get) return false;
+        get.Arg("Owner", owner).Arg("Item", asset).Arg("bIncludeStash", false);
+        if (!Run(get)) return false;
+        UObject* info = get.Out<UObject*>("ReturnValue");
+        if (!info) return true;
+        if (!CarriedStack(info)) return false;
+        selected = Weak(info);
+        found = true;
+        return true;
+    }
+    bool ReadTotal(int& total) override { return Read(0, total); }
+    bool ReadStack(int& count) override
+    {
+        UObject* info = selected.Get();
+        int32_t* stack = Member<int32_t>(info, "StackableCount");
+        if (!CarriedStack(info) || !stack || !SafeRead(stack, &count, sizeof(count)) || count < 0) return false;
+        selectedCount = count;
+        return true;
+    }
+    bool Remove(int, int amount) override
+    {
+        UObject* info = selected.Get();
+        int count = 0;
+        int32_t* stack = Member<int32_t>(info, "StackableCount");
+        if (!CarriedStack(info) || !stack || !SafeRead(stack, &count, sizeof(count)) ||
+            count != selectedCount || amount <= 0 || amount > count ||
+            !HasParams("RemoveItem", {"ItemInfo", "RemoveCount", "bSkipCallback"})) return false;
+        Call remove(manager.Get(), "RemoveItem");
+        remove.Arg("ItemInfo", info).Arg("RemoveCount", amount).Arg("bSkipCallback", false);
+        return Run(remove);
+    }
+    bool CanRefresh()
+    {
+        return HasParams("AddPlayerItemToSaveGame", {"ItemInfo"}) &&
+            HasParams("CallbackUpdatedUIWithItem", {"ItemInfo", "Owner", "bBlockUIUpdate"});
+    }
+    bool CreateZeroStack() override
+    {
+        UObject* asset = item.Get();
+        UObject* owner = player.Get();
+        auto* infoClass = FindClass("ItemInfoStackable");
+        UObject* defaults = Cdo("ItemInfoStackable");
+        int count = -1, total = -1;
+        bool defaultInStash = true;
+        uint8_t inventoryType = 255, itemType = 255;
+        int32_t* defaultCount = Member<int32_t>(defaults, "StackableCount");
+        uint8_t* inventory = Member<uint8_t>(asset, "InventoryType");
+        uint8_t* type = Member<uint8_t>(asset, "ItemType");
+        // Confirm the native creation assumptions at runtime. A different item class/default is unavailable.
+        if (!asset || !owner || !infoClass || Ptr(asset, "ItemInfo") != reinterpret_cast<UObject*>(infoClass) ||
+            !defaultCount || !SafeRead(defaultCount, &count, sizeof(count)) || count != 0 ||
+            !GetBool(defaults, "bIsInStash", &defaultInStash) || defaultInStash ||
+            !inventory || !SafeRead(inventory, &inventoryType, sizeof(inventoryType)) || inventoryType != 0 ||
+            !type || !SafeRead(type, &itemType, sizeof(itemType)) || itemType != 140 || !CanRefresh() ||
+            !HasParams("CreateAndInitializeItem", {"Item", "Owner", "ItemInfoRef"}) || !ReadTotal(total) || total != 0)
+            return false;
+        // The verified native path registers a zero-count non-grid stack and places it via its callback.
+        // It does not call AddItemInInventory/DropItem; zero count avoids native stack-limit removal.
+        Call create(manager.Get(), "CreateAndInitializeItem");
+        create.Arg("Item", asset).Arg("Owner", owner);
+        if (!Run(create)) return false;
+        selected = Weak(create.Out<UObject*>("ItemInfoRef"));
+        struct Position { double x, y; } pos{-1, -1};
+        Position* placed = Member<Position>(selected.Get(), "ItemPos");
+        return ReadStack(count) && count == 0 && placed && SafeRead(placed, &pos, sizeof(pos)) &&
+            std::isfinite(pos.x) && std::isfinite(pos.y) && pos.x >= 0 && pos.y >= 0;
+    }
+    bool WriteStack(int count) override
+    {
+        UObject* info = selected.Get();
+        int before = -1;
+        int32_t* stack = Member<int32_t>(info, "StackableCount");
+        if (count < 0 || count > 9999 || !CanRefresh() || !CarriedStack(info) || !stack ||
+            !SafeRead(stack, &before, sizeof(before)) || before != selectedCount) return false;
+        // This is an explicit material cheat, like the native GiveItem SetStackableCount branch.
+        // Its 0..9999 requested total intentionally is not clamped to the pickup stack size (10).
+        *stack = count;
+        return true;
+    }
+    bool RefreshStack() override
+    {
+        UObject* info = selected.Get();
+        if (!CarriedStack(info) || !CanRefresh()) return false;
+        Call save(manager.Get(), "AddPlayerItemToSaveGame");
+        save.Arg("ItemInfo", info);
+        if (!Run(save)) return false;
+        Call refresh(manager.Get(), "CallbackUpdatedUIWithItem");
+        refresh.Arg("ItemInfo", info).Arg("Owner", player.Get()).Arg("bBlockUIUpdate", false);
+        return Run(refresh);
+    }
+    bool Add(int, int amount) override { return resources::AddToStack(*this, amount); }
+};
+
+const char* ResourceResultText(resources::Status status)
+{
+    switch (status) {
+    case resources::Status::Success: return "Material total verified";
+    case resources::Status::InvalidInput: return "Invalid material or target total";
+    case resources::Status::ReadFailed: return "Could not read the carried material total";
+    case resources::Status::StackUnavailable: return "Could not find a carried stack";
+    case resources::Status::MutationFailed: return "Material change failed";
+    case resources::Status::NoProgress: return "Inventory full or no progress";
+    case resources::Status::UnexpectedMovement: return "Unexpected material count change; stopped";
+    case resources::Status::AttemptsExceeded: return "Material change limit reached; stopped";
+    }
+    return "Material change failed";
 }
 
 // Pickups of this item lying in the level.
@@ -1145,6 +1306,13 @@ void SlowRefresh(UObject* player, Snapshot& snap)
 {
     UObject* pc = s.pc.Get();
     snap.money = ItemCount(FindItem("Item_Currency"));
+    ReadItemAssets();
+    for (int i = 0; i < resources::Count; ++i) {
+        UObject* item = FindItem(resources::Names[i]);
+        ResourceInventory inventory(player, item);
+        int total = -1;
+        snap.resourceTotals[i] = inventory.Read(i, total) ? total : -1;
+    }
     Call shop(Cdo("ShopFunctions"), "GetShopItemAvailability");
     snap.shopLevel = shop.Arg(0, pc).Run() ? shop.Out<int32_t>("ReturnValue") : -1;
     snap.map = Name(OuterOf(OuterOf(player))); // player -> PersistentLevel -> World
@@ -1273,6 +1441,7 @@ void Tick()
     UObject* pawn = Ptr(s.pc.Get(), "Pawn");
     UObject* player = pawn && IsA(pawn, FindClass("PlayerCharacter")) ? pawn : nullptr;
     if (player != s.player.Get()) { // new level or first load: per-pawn state starts over
+        snap.resourceTotals.fill(-1);
         s.player = Weak(player);
         s.attrs = Weak(AttributeSet(player, "PlayerAttributeSet"));
         s.cmc = Weak(Ptr(player, "CharacterMovement"));
@@ -1313,6 +1482,7 @@ void Tick()
         snap.powersWhy = "Load a save first.";
         snap.powers = {};
         snap.money = snap.shopLevel = -1;
+        snap.resourceTotals.fill(-1);
         std::lock_guard lock(g_espMutex);
         g_esp = {};
     }
@@ -1350,6 +1520,7 @@ Snapshot GetSnapshot()
         snap.reflection = snap.player = snap.cheatManager = true;
         snap.health = 74, snap.maxHealth = 100, snap.suffering = 45, snap.maxSuffering = 100;
         snap.money = 1040, snap.shopLevel = 2;
+        snap.resourceTotals = {24, 18, 12, 6, 8, 3};
         snap.map = snap.slots[0] = "MAP_EP_5";
         snap.powers = {true, false, false};
         snap.powersWhy.clear();
@@ -1361,6 +1532,7 @@ Snapshot GetSnapshot()
         snap.why.fill("Game engine not hooked: see BananMenu.log.");
         snap.valueWhy.fill("Game engine not hooked: see BananMenu.log.");
         snap.powersWhy = "Game engine not hooked: see BananMenu.log.";
+        snap.resourceTotals.fill(-1);
     }
     return snap;
 }
@@ -1498,6 +1670,40 @@ void AddMoney(int delta)
             left -= n;
         }
         km::Log("Remove money %d: %d left to remove", -delta, left);
+    });
+}
+
+void SetResourceTotal(int materialIndex, int total)
+{
+    RunOnGameThread([materialIndex, total] {
+        // Validate again at execution, before indexing names or resolving assets.
+        if (materialIndex < 0 || materialIndex >= resources::Count || total < 0 || total > 9999) {
+            menu::Toast(lang::T("Invalid material or target total"));
+            return;
+        }
+        UObject* player = s.player.Get();
+        if (!player || Ptr(s.pc.Get(), "Pawn") != player) {
+            menu::Toast(lang::T("Load a save first."));
+            return;
+        }
+        resources::Result result{resources::Status::ReadFailed};
+        std::function<void()> reconcile = [&] {
+            ReadItemAssets();
+            UObject* item = FindItem(resources::Names[materialIndex]);
+            ResourceInventory inventory(player, item);
+            result = resources::Reconcile(inventory, materialIndex, total);
+        };
+        if (!Guard(reconcile)) result = {resources::Status::MutationFailed};
+        {
+            std::lock_guard lock(g_snapMutex);
+            g_snap.resourceTotals[materialIndex] = result.observed;
+        }
+        char message[512];
+        snprintf(message, sizeof(message), lang::T("%s: %s (current %d, target %d)"),
+                 lang::T(resources::Labels[materialIndex]), lang::T(ResourceResultText(result.status)), result.observed, total);
+        menu::Toast(message);
+        km::Log("Set resource %s to %d: status %d, observed %d", resources::Names[materialIndex], total,
+                int(result.status), result.observed);
     });
 }
 

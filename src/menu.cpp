@@ -546,6 +546,49 @@ void TabInventory(const feat::Snapshot& s)
         ImGui::EndDisabled();
     }
 
+    Section("CRAFTING MATERIALS");
+    Hint("Carried inventory only. Enter a total from 0 to 9999.");
+    static std::array<std::string, resources::Count> resourceTargets{};
+    static std::array<bool, resources::Count> resourceInitialized{};
+    if (!s.player) resourceInitialized.fill(false);
+    for (int i = 0; i < resources::Count; ++i) {
+        ImGui::PushID(i);
+        const int observed = s.resourceTotals[i];
+        if (!resourceInitialized[i] && observed >= 0) {
+            resourceTargets[i] = std::to_string(observed);
+            resourceInitialized[i] = true;
+        }
+        const float avail = ImGui::GetContentRegionAvail().x, x0 = ImGui::GetCursorPosX();
+        RowHover(ImGui::GetCursorScreenPos(), avail);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(T(resources::Labels[i]));
+        ImGui::SameLine(x0 + avail * 0.30f);
+        if (observed >= 0) ImGui::Text(T("Current: %d"), observed);
+        else ImGui::TextDisabled("%s", T("Unavailable"));
+        ImGui::SameLine(x0 + avail * 0.57f);
+        ImGui::BeginDisabled(!s.player || !s.reflection || observed < 0);
+        ImGui::SetNextItemWidth(avail * 0.43f - ButtonWidth(T("Set")) - ImGui::GetStyle().ItemSpacing.x);
+        // Resizable input preserves the whole pasted number so overflow is rejected rather than truncated.
+        auto resizeTarget = [](ImGuiInputTextCallbackData* data) {
+            auto& text = *static_cast<std::string*>(data->UserData);
+            text.resize(size_t(data->BufTextLen));
+            data->Buf = text.data();
+            return 0;
+        };
+        ImGui::InputText("##resource-target", resourceTargets[i].data(), resourceTargets[i].capacity() + 1,
+                         ImGuiInputTextFlags_CharsDecimal | ImGuiInputTextFlags_CallbackResize,
+                         resizeTarget, &resourceTargets[i]);
+        int target = 0;
+        const bool valid = resources::ParseTarget(resourceTargets[i], target);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!valid);
+        if (ImGui::Button(T("Set"))) feat::SetResourceTotal(i, target);
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
+        if (!valid && observed >= 0) ImGui::TextDisabled("%s", T("Enter a whole number from 0 to 9999."));
+        ImGui::PopID();
+    }
+
     Section("GIVE ITEMS");
     Hint("Key items can break scripted sequences: save before giving them.");
     float qtyW = ImGui::GetFontSize() * 4;
