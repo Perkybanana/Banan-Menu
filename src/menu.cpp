@@ -568,7 +568,7 @@ void TabInventory(const feat::Snapshot& s)
         ImGui::SameLine(x0 + avail * 0.57f);
         ImGui::BeginDisabled(!s.player || !s.reflection || observed < 0);
         ImGui::SetNextItemWidth(avail * 0.43f - ButtonWidth(T("Set")) - ImGui::GetStyle().ItemSpacing.x);
-        // Resizable input preserves the whole pasted number so overflow is rejected rather than truncated.
+        // Keep raw input so whole-input validation rejects malformed or overflowing pasted text.
         auto resizeTarget = [](ImGuiInputTextCallbackData* data) {
             auto& text = *static_cast<std::string*>(data->UserData);
             text.resize(size_t(data->BufTextLen));
@@ -576,7 +576,7 @@ void TabInventory(const feat::Snapshot& s)
             return 0;
         };
         ImGui::InputText("##resource-target", resourceTargets[i].data(), resourceTargets[i].capacity() + 1,
-                         ImGuiInputTextFlags_CharsDecimal | ImGuiInputTextFlags_CallbackResize,
+                         ImGuiInputTextFlags_CallbackResize,
                          resizeTarget, &resourceTargets[i]);
         int target = 0;
         const bool valid = resources::ParseTarget(resourceTargets[i], target);
