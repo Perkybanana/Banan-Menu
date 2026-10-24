@@ -1564,6 +1564,63 @@ void Save()
     for (int v = 0; v < ValueCount; v++) cfg::SetFloat("Values", kValues[v].key, g_value[v]);
 }
 
+const presets::Schema& ProfileSchema()
+{
+    static const auto schema = [] {
+        presets::Schema result;
+        for (const auto& toggle : kToggles) result.toggles.emplace_back(toggle.key);
+        for (const auto& value : kValues) result.values.push_back({value.key, value.min, value.max});
+        return result;
+    }();
+    return schema;
+}
+
+presets::Profile CaptureProfile(std::string name)
+{
+    presets::Profile profile{std::move(name), {}};
+    for (int t = 0; t < ToggleCount; ++t) profile.settings.toggles.emplace(kToggles[t].key, g_on[t].load());
+    for (int v = 0; v < ValueCount; ++v) profile.settings.values.emplace(kValues[v].key, g_value[v].load());
+    return profile;
+}
+
+void ApplyProfile(presets::Profile profile)
+{
+    RunOnGameThread([profile = std::move(profile)] {
+        const auto result = presets::ApplyProfile(profile, ProfileSchema(),
+            [](const std::string& key, bool on) {
+                for (int t = 0; t < ToggleCount; ++t) if (key == kToggles[t].key) { g_on[t] = on; break; }
+            },
+            [](const std::string& key, float value) {
+                for (int v = 0; v < ValueCount; ++v) if (key == kValues[v].key) { g_value[v] = value; break; }
+            });
+        if (result == presets::Error::Ok) Save();
+        menu::Toast(lang::T(result == presets::Error::Ok ? "Profile applied" : "Invalid settings profile"));
+    });
+}
+
+void GiveKit(presets::Kit kit)
+{
+    RunOnGameThread([kit = std::move(kit)] {
+        if (presets::ValidateKit(kit) != presets::Error::Ok) {
+            menu::Toast(lang::T("Invalid item kit")); return;
+        }
+        if (!s.player.Get()) { menu::Toast(lang::T("Load a save first.")); return; }
+        // Rebuild exact availability on this thread; the render snapshot is never an authority for delivery.
+        ReadItemAssets();
+        std::set<std::string> available;
+        for (const auto& asset : g_itemAssets) available.insert(asset.name);
+        ForEachInstance(FindClass("Item"), [&](UObject* object) {
+            auto id = Name(object);
+            if (std::find(g_itemsLeftOut.begin(), g_itemsLeftOut.end(), id) == g_itemsLeftOut.end()) available.insert(std::move(id));
+            return true;
+        });
+        auto result = presets::SendKit(kit,
+            [&](const std::string& id) { return available.contains(id); },
+            [](const std::string& id, int quantity) { GiveItem(id, quantity); });
+        menu::Toast(lang::T(result == presets::Error::Ok ? "Item requests sent" : "Item unavailable; no requests sent"));
+    });
+}
+
 void SetHealth(float value)
 {
     OnGame([value](UObject*) {

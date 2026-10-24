@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "resources_core.h"
+#include "presets_core.h"
 
 namespace feat {
 
@@ -97,6 +98,10 @@ EspFrame GetEspFrame();
 
 void Init();  // loads toggles/values from the ini, registers the game-thread tick
 void Save();  // writes toggles/values to the ini
+const presets::Schema& ProfileSchema();
+presets::Profile CaptureProfile(std::string name); // atomics only; no game objects or actions
+void ApplyProfile(presets::Profile profile); // copied, validated and applied on the game thread
+void GiveKit(presets::Kit kit); // validates every exact ID before queueing any existing GiveItem action
 
 // One-shot actions, queued to the game thread.
 void Heal();

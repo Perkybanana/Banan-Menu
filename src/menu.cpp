@@ -6,6 +6,7 @@
 #include "lang.h"
 #include "log.h"
 #include "overlay.h"
+#include "presets.h"
 #include "text.h"
 #include "theme.h"
 
@@ -16,6 +17,7 @@
 #include <cmath>
 #include <deque>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -515,6 +517,189 @@ void TabEsp(const feat::Snapshot& s)
     ImGui::EndDisabled();
 }
 
+struct SavedDataUi {
+    presets::Repository repository{std::filesystem::path(km::g_dir) / L"BananMenu.presets", feat::ProfileSchema()};
+    bool loadFailed = false;
+    std::optional<presets::Store> undo;
+    SavedDataUi() { loadFailed = repository.Load() != presets::Error::Ok; }
+};
+SavedDataUi& SavedData() { static SavedDataUi data; return data; } // created and accessed only by render
+
+const char* PresetError(presets::Error error)
+{
+    switch (error) {
+    case presets::Error::InvalidSettings: return "Invalid settings profile";
+    case presets::Error::InvalidKit: return "Invalid item kit";
+    case presets::Error::Limit: return "Preset limit reached";
+    case presets::Error::Io: return "Could not save presets; existing file unchanged";
+    case presets::Error::Protected: return "Preset file could not be loaded; original preserved. Edits are disabled.";
+    default: return "Invalid preset data or name";
+    }
+}
+bool SaveData(presets::Store next)
+{
+    auto& ui = SavedData();
+    auto previous = ui.repository.Data();
+    const auto result = ui.repository.Save(next);
+    if (result == presets::Error::Ok) ui.undo = std::move(previous);
+    PushToast(T(result == presets::Error::Ok ? "Presets saved" : PresetError(result)), -1);
+    return result == presets::Error::Ok;
+}
+void SavedDataControls()
+{
+    auto& ui = SavedData();
+    if (ui.loadFailed) Hint("Preset file could not be loaded; original preserved. Edits are disabled.");
+    else if (ui.repository.Status() != presets::Error::Ok) Hint(PresetError(ui.repository.Status()));
+    if (ui.undo && ImGui::SmallButton(T("Undo last preset edit"))) {
+        auto result = ui.repository.Save(*ui.undo);
+        if (result == presets::Error::Ok) ui.undo.reset();
+        PushToast(T(result == presets::Error::Ok ? "Preset edit undone" : PresetError(result)), -1);
+    }
+}
+bool ItemAvailable(const feat::Snapshot& snapshot, const std::string& id)
+{
+    for (const auto& [category, items] : snapshot.items)
+        for (const auto& item : items) if (item.name == id) return true;
+    return false;
+}
+bool SavedNameSelectable(const std::string& name, bool selected)
+{
+    // Treat user text literally: ImGui label markers such as ## never become user-controlled IDs.
+    bool clicked = ImGui::Selectable("##saved-name", selected);
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->PushClipRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), true);
+    draw->AddText(ImGui::GetItemRectMin(), ImGui::GetColorU32(ImGuiCol_Text), name.c_str());
+    draw->PopClipRect();
+    return clicked;
+}
+bool BeginSavedCombo(const char* label, const char* preview)
+{
+    // Render literal data in the parent frame even when BeginCombo opens a popup window.
+    const auto position = ImGui::GetCursorScreenPos();
+    const auto padding = ImGui::GetStyle().FramePadding;
+    const float width = ImGui::GetContentRegionAvail().x, height = ImGui::GetFrameHeight();
+    auto* draw = ImGui::GetWindowDrawList(); const auto color = ImGui::GetColorU32(ImGuiCol_Text);
+    ImGui::SetNextItemWidth(width);
+    bool opened = ImGui::BeginCombo(label, nullptr);
+    draw->PushClipRect({position.x + padding.x, position.y}, {position.x + width - height, position.y + height}, true);
+    draw->AddText({position.x + padding.x, position.y + padding.y}, color, preview);
+    draw->PopClipRect();
+    return opened;
+}
+void FavoriteButton(const std::string& id)
+{
+    auto& ui = SavedData();
+    bool favorite = ui.repository.Data().favorites.contains(id);
+    ImGui::BeginDisabled(ui.loadFailed);
+    if (ImGui::SmallButton(T(favorite ? "Unfavorite" : "Favorite"))) {
+        auto next = ui.repository.Data();
+        if (favorite) next.favorites.erase(id);
+        else if (next.favorites.size() < presets::MaxFavorites) next.favorites.insert(id);
+        else { PushToast(T("Preset limit reached"), -1); ImGui::EndDisabled(); return; }
+        SaveData(std::move(next));
+    }
+    ImGui::EndDisabled();
+}
+void DrawFavorites(const feat::Snapshot& snapshot)
+{
+    Section("FAVORITES");
+    SavedDataControls();
+    static int count = 1;
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 5);
+    ImGui::InputInt(T("Favorite quantity"), &count, 0, 0);
+    const bool valid = count >= 1 && count <= 9999;
+    if (!valid) Hint("Enter a whole number from 1 to 9999.");
+    // Copy: a removal commits a replacement store during this loop.
+    const auto favorites = SavedData().repository.Data().favorites;
+    if (favorites.empty()) ImGui::TextDisabled("%s", T("Mark items as favorites in the browser below."));
+    if (ImGui::BeginTable("favorites", 3, ImGuiTableFlags_SizingFixedFit)) {
+        ImGui::TableSetupColumn("Item", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Give"); ImGui::TableSetupColumn("Favorite");
+        for (const auto& id : favorites) {
+            ImGui::PushID(id.c_str()); ImGui::TableNextRow(); ImGui::TableNextColumn();
+            const bool available = ItemAvailable(snapshot, id);
+            ImGui::TextUnformatted(available ? Pretty(id).c_str() : id.c_str());
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", id.c_str());
+            if (!available) ImGui::TextDisabled("%s", T("Unavailable"));
+            ImGui::TableNextColumn();
+            ImGui::BeginDisabled(!snapshot.player || !available || !valid);
+            if (ImGui::SmallButton(T("Give"))) feat::GiveKit({"Favorites", {{id, count}}});
+            ImGui::EndDisabled(); ImGui::TableNextColumn(); FavoriteButton(id); ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+}
+
+struct KitEditor { presets::Kit draft; char name[257]{}; int selected = -1; };
+KitEditor& EditedKit() { static KitEditor editor; return editor; }
+void DrawKits(const feat::Snapshot& snapshot)
+{
+    Section("ITEM KITS TO GIVE");
+    Hint("Kits give items; they do not equip slots. Native delivery may refuse or drop items when inventory is full.");
+    auto& editor = EditedKit(); auto& ui = SavedData();
+    const auto& kits = ui.repository.Data().kits;
+    if (editor.selected >= int(kits.size())) editor.selected = -1;
+    const char* preview = editor.selected >= 0 ? kits[editor.selected].name.c_str() : T("Select a saved kit");
+    if (BeginSavedCombo("##saved-kits", preview)) {
+        for (int i = 0; i < int(kits.size()); ++i) {
+            ImGui::PushID(i);
+            if (SavedNameSelectable(kits[i].name, editor.selected == i)) editor.selected = i;
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::BeginDisabled(editor.selected < 0);
+    if (ImGui::Button(T("Load for editing"))) {
+        editor.draft = kits[editor.selected];
+        strcpy_s(editor.name, editor.draft.name.c_str());
+    }
+    ImGui::SameLine(); ImGui::BeginDisabled(!snapshot.player);
+    if (ImGui::Button(T("Give kit"))) feat::GiveKit(kits[editor.selected]);
+    ImGui::EndDisabled(); ImGui::SameLine(); ImGui::BeginDisabled(ui.loadFailed);
+    bool remove = ImGui::Button(T("Delete kit"));
+    ImGui::EndDisabled(); ImGui::EndDisabled();
+    // Saved kit contents, including missing IDs, remain visible without loading or delivering them.
+    if (editor.selected >= 0) for (const auto& entry : kits[editor.selected].entries) {
+        ImGui::Text("%s  x%d", entry.id.c_str(), entry.quantity);
+        if (!ItemAvailable(snapshot, entry.id)) { ImGui::SameLine(); ImGui::TextDisabled("%s", T("Unavailable")); }
+    }
+    if (remove) {
+        auto next = ui.repository.Data(); next.kits.erase(next.kits.begin() + editor.selected);
+        if (SaveData(std::move(next))) editor.selected = -1;
+    }
+    if (ImGui::Button(T("New kit"))) { editor.draft = {}; editor.name[0] = 0; }
+    ImGui::SameLine(); ImGui::TextDisabled(T("Draft entries: %d / 32"), int(editor.draft.entries.size()));
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    ImGui::InputTextWithHint("##kit-name", T("Kit name (up to 64 characters)"), editor.name, sizeof(editor.name));
+    Hint("Add exact items from the browser below. Saving a name replaces the kit with that name.");
+    if (ImGui::BeginTable("kit-draft", 3, ImGuiTableFlags_SizingFixedFit)) {
+        ImGui::TableSetupColumn("Item", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Quantity"); ImGui::TableSetupColumn("Remove");
+        int erase = -1;
+        for (int i = 0; i < int(editor.draft.entries.size()); ++i) {
+            auto& entry = editor.draft.entries[i];
+            ImGui::PushID(i); ImGui::TableNextRow(); ImGui::TableNextColumn();
+            ImGui::TextUnformatted(entry.id.c_str());
+            if (!ItemAvailable(snapshot, entry.id)) ImGui::TextDisabled("%s", T("Unavailable"));
+            ImGui::TableNextColumn(); ImGui::SetNextItemWidth(ImGui::GetFontSize() * 5);
+            ImGui::InputInt("##kit-quantity", &entry.quantity, 0, 0);
+            if (entry.quantity < 1 || entry.quantity > 9999) ImGui::TextDisabled("%s", T("Enter a whole number from 1 to 9999."));
+            ImGui::TableNextColumn(); if (ImGui::SmallButton(T("Remove item"))) erase = i;
+            ImGui::PopID();
+        }
+        if (erase >= 0) editor.draft.entries.erase(editor.draft.entries.begin() + erase);
+        ImGui::EndTable();
+    }
+    auto candidate = editor.draft; candidate.name = editor.name;
+    ImGui::BeginDisabled(ui.loadFailed || presets::ValidateKit(candidate) != presets::Error::Ok);
+    if (ImGui::Button(T("Save kit"))) {
+        auto next = ui.repository.Data(); auto result = presets::PutKit(next, candidate);
+        if (result == presets::Error::Ok) SaveData(std::move(next));
+        else PushToast(T(PresetError(result)), -1);
+    }
+    ImGui::EndDisabled();
+}
+
 void TabInventory(const feat::Snapshot& s)
 {
     static int amount = 1000, giveCount = 1;
@@ -589,6 +774,8 @@ void TabInventory(const feat::Snapshot& s)
         ImGui::PopID();
     }
 
+    DrawFavorites(s);
+    DrawKits(s);
     Section("GIVE ITEMS");
     Hint("Key items can break scripted sequences: save before giving them.");
     float qtyW = ImGui::GetFontSize() * 4;
@@ -616,8 +803,16 @@ void TabInventory(const feat::Snapshot& s)
             RowHover(ImGui::GetCursorScreenPos(), ImGui::GetContentRegionAvail().x);
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(label.c_str());
-            SameLineRight(ButtonWidth(T("Give")));
+            // Separate action row prevents long asset labels from colliding with the controls.
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", item.name.c_str());
+            ImGui::BeginDisabled(!s.player);
             if (ImGui::Button(T("Give"))) feat::GiveItem(item.name, giveCount);
+            ImGui::EndDisabled();
+            ImGui::SameLine(); FavoriteButton(item.name); ImGui::SameLine();
+            if (ImGui::SmallButton(T("Add to kit"))) {
+                auto result = presets::AddEntry(EditedKit().draft, item.name, giveCount);
+                if (result != presets::Error::Ok) PushToast(T(PresetError(result)), -1);
+            }
             ImGui::PopID();
         }
     }
@@ -750,6 +945,48 @@ void BindButton(const char* id, int target, unsigned key)
     ImGui::PopID();
 }
 
+void DrawProfiles()
+{
+    Section("SETTINGS PROFILES");
+    SavedDataControls();
+    Hint("Profiles store feature toggles and values. Apply is explicit; startup and map changes never load a profile.");
+    static char name[257]{};
+    static int selected = -1;
+    auto& ui = SavedData(); const auto& profiles = ui.repository.Data().profiles;
+    if (selected >= int(profiles.size())) selected = -1;
+    if (BeginSavedCombo("##profiles", selected >= 0 ? profiles[selected].name.c_str() : T("Select a saved profile"))) {
+        for (int i = 0; i < int(profiles.size()); ++i) {
+            ImGui::PushID(i);
+            if (SavedNameSelectable(profiles[i].name, selected == i)) {
+                selected = i;
+                strcpy_s(name, profiles[i].name.c_str());
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::BeginDisabled(selected < 0);
+    if (ImGui::Button(T("Apply profile"))) feat::ApplyProfile(profiles[selected]);
+    ImGui::SameLine(); ImGui::BeginDisabled(ui.loadFailed);
+    bool remove = ImGui::Button(T("Delete profile"));
+    ImGui::EndDisabled(); ImGui::EndDisabled();
+    if (remove) {
+        auto next = ui.repository.Data(); next.profiles.erase(next.profiles.begin() + selected);
+        if (SaveData(std::move(next))) selected = -1;
+    }
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    ImGui::InputTextWithHint("##profile-name", T("Profile name (up to 64 characters)"), name, sizeof(name));
+    Hint("Save current settings replaces the profile with the same name.");
+    ImGui::BeginDisabled(ui.loadFailed || !presets::ValidName(name));
+    if (ImGui::Button(T("Save current settings"))) {
+        auto next = ui.repository.Data();
+        auto result = presets::PutProfile(next, feat::CaptureProfile(name), feat::ProfileSchema());
+        if (result == presets::Error::Ok) SaveData(std::move(next));
+        else PushToast(T(PresetError(result)), -1);
+    }
+    ImGui::EndDisabled();
+}
+
 void TabSettings(const feat::Snapshot& s)
 {
     Section("MENU");
@@ -810,6 +1047,7 @@ void TabSettings(const feat::Snapshot& s)
         ImGui::EndTable();
     }
 
+    DrawProfiles();
     Section("CONFIGURATION");
     if (ImGui::Button(T("Reset configuration"))) ImGui::OpenPopup("###reset");
     ImGui::SameLine();

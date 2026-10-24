@@ -40,7 +40,7 @@ add_library(minhook STATIC
 target_include_directories(minhook PUBLIC ${minhook_SOURCE_DIR}/include)
 
 # The game statically imports winmm.dll, so a winmm.dll next to the exe is loaded at startup.
-add_library(BananMenu SHARED src/dllmain.cpp src/overlay.cpp src/menu.cpp src/ue.cpp src/features.cpp src/achievements.cpp src/missions.cpp src/esp.cpp src/lang.cpp src/resources.rc src/winmm_stubs.asm)
+add_library(BananMenu SHARED src/dllmain.cpp src/overlay.cpp src/menu.cpp src/ue.cpp src/features.cpp src/presets.cpp src/achievements.cpp src/missions.cpp src/esp.cpp src/lang.cpp src/resources.rc src/winmm_stubs.asm)
 set_target_properties(BananMenu PROPERTIES OUTPUT_NAME winmm)
 target_compile_definitions(BananMenu PRIVATE KM_VERSION="${PROJECT_VERSION}" WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(BananMenu PRIVATE $<$<COMPILE_LANGUAGE:C,CXX>:/W4 /utf-8>)
@@ -53,6 +53,10 @@ target_link_libraries(BananMenu PRIVATE imgui minhook dxgi delayimp)
 target_link_options(BananMenu PRIVATE /DELAYLOAD:d3dcompiler_47.dll /DELAYLOAD:dxgi.dll)
 
 enable_testing()
+add_executable(presets_test tests/presets_test.cpp src/presets.cpp)
+target_compile_definitions(presets_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_options(presets_test PRIVATE /W4 /utf-8)
+add_test(NAME presets_test COMMAND presets_test)
 add_executable(resources_test tests/resources_test.cpp)
 target_compile_options(resources_test PRIVATE /W4 /utf-8)
 add_test(NAME resources_test COMMAND resources_test)
