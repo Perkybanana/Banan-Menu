@@ -1,15 +1,15 @@
 # Development verification scope
 
-This records the scope of 1.0.0-dev.1 development work as of 2026-10-24. It is not stable-release acceptance.
+This records the scope of 1.0.0-dev.2 development work as of 2026-10-25. It is not stable-release acceptance.
 
 | Area | Evidence and limits |
 | --- | --- |
 | Six carried crafting resources | User accepted totals 0..9999. Native inventory refreshes on reopen. |
 | Profiles, favorites, explicit item kits | User accepted after returning to the main menu and restarting the game on 2026-10-24. Kits request delivery with existing native capacity/drop behavior; no atomic equip/loadout claim. |
 | Native chapter selection and return to main menu | Tested including Chapter5. Every chapter has not been independently tested. |
-| Camera bookmarks | Source review and build tests pass. Runtime acceptance is pending, including all three slots, pose/FOV, movement after restore, camera/pawn/map transitions, no player teleport and RU/EN display. Bookmarks last only for the process session. |
+| Camera bookmarks | User reported dev.1 failure. Read-only diagnosis found valid strong camera-component/manager targets with unassigned serials rejected by the strict retained-reference path. A focused source fix and production-resolver offline tests exist; dev.2 native acceptance is pending, including all three slots, pose/FOV, movement after restore, camera/pawn/map transitions, no player teleport and RU/EN display. Bookmarks last only for the process session. |
 | Live-checkpoint teleport | Moves to an existing loaded checkpoint; not a complete story-state start. |
-| Independent full checkpoint pack | Not implemented, prepared or verified. |
+| Arbitrary checkpoint starts | Outside current scope by owner decision on 2026-10-25; no independent story-state pack/loader is planned. Native episode/chapter selection is retained. |
 | Recoil, attack speed, hand visibility, enemy spawning, cut-item functionality | Deferred; no implemented-functionality claim. |
 | Recorded scan evidence (exact hash only) | Controller scanned SHA-256 `ea63783deb724251c1505faa657a0fcd0a214468d2e8458150cd4212cf750d8f` with Microsoft Defender on 2026-10-24: exit 0, no threats reported. This is historical evidence only for that exact DLL. Consult per-candidate release notes for the DLL being installed; a different hash or future CI build requires its own scan evidence. Offline tests and this scoped scan cannot guarantee absence of all malicious code or establish runtime acceptance. |
 

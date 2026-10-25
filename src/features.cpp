@@ -737,14 +737,9 @@ std::string PhotoMapIdentity(UObject* player)
     return path;
 }
 
-UObject* PhotoObject(UObject* owner, const char* name, const char* className)
+UObject* PhotoObject(const GenerationRef& owner, const char* name, const char* className)
 {
-    const Prop prop = owner ? FindProp(ClassOf(owner), name, true) : Prop{};
-    if (!prop.Is(Prop::Kind::Object, sizeof(UObject*))) return nullptr;
-    UObject* object = nullptr;
-    if (!SafeRead(reinterpret_cast<uint8_t*>(owner) + prop.offset, &object, sizeof(object))) return nullptr;
-    object = GenerationRef(object).Get();
-    return object && !IsDefaultObject(object) && IsA(object, FindClass(className)) ? object : nullptr;
+    return FreshObjectProperty(owner, name, FindClass(className)).Get();
 }
 
 Call PhotoCall(UObject* object, const char* function) { return Call(object, function, true); }
@@ -757,14 +752,14 @@ public:
         UObject* player = s.photoPlayer.Get();
         UObject* camera = s.photoCamera.Get();
         if (!pc || !player || !camera || pc != s.pc.Get() || player != s.player.Get() || camera != s.camera.Get() ||
-            PhotoObject(pc, "Pawn", "PlayerCharacter") != player || !s.photoWorld.Get() ||
+            PhotoObject(s.photoController, "Pawn", "PlayerCharacter") != player || !s.photoWorld.Get() ||
             OuterOf(OuterOf(player)) != s.photoWorld.Get())
             return "Free camera lifetime unavailable. Re-enable free camera.";
         if (!IsA(camera, FindClass("CameraActor")) || IsDefaultObject(camera)) return "Free camera unavailable.";
         auto target = PhotoCall(pc, "GetViewTarget");
         if (!target.Run() || target.Out<UObject*>("ReturnValue") != camera) return "Free camera is not the active view.";
-        UObject* component = PhotoObject(camera, "CameraComponent", "CameraComponent");
-        UObject* manager = PhotoObject(pc, "PlayerCameraManager", "PlayerCameraManager");
+        UObject* component = PhotoObject(s.photoCamera, "CameraComponent", "CameraComponent");
+        UObject* manager = PhotoObject(s.photoController, "PlayerCameraManager", "PlayerCameraManager");
         if (!component || !manager || !FindProp(ClassOf(component), "FieldOfView", true).Is(Prop::Kind::Float, sizeof(float)))
             return "Camera field of view unavailable.";
         if (!PhotoCall(camera, "K2_GetActorLocation") || !PhotoCall(camera, "K2_GetActorRotation") ||
@@ -777,10 +772,16 @@ public:
     std::string Map() const override { return PhotoMapIdentity(s.photoPlayer.Get()); }
     bool Read(photo::Pose& pose) override {
         if (!Active()) return false;
-        UObject* camera = s.photoCamera.Get();
-        auto position = PhotoCall(camera, "K2_GetActorLocation"), rotation = PhotoCall(camera, "K2_GetActorRotation");
-        auto fov = PhotoCall(PhotoObject(s.photoController.Get(), "PlayerCameraManager", "PlayerCameraManager"), "GetFOVAngle");
-        if (!position.Run() || !rotation.Run() || !fov.Run()) return false;
+        const GenerationRef camera = s.photoCamera;
+        const FreshObjectProperty manager(s.photoController, "PlayerCameraManager", FindClass("PlayerCameraManager"));
+        auto position = PhotoCall(camera.Get(), "K2_GetActorLocation");
+        if (!position.Run()) return false;
+        auto rotation = PhotoCall(camera.Get(), "K2_GetActorRotation");
+        if (!rotation.Run()) return false;
+        // Native calls may replace strongly referenced zero-serial objects. Re-resolve now,
+        // never carry a manager pointer or a Call targeting it across those calls.
+        auto fov = PhotoCall(manager.Get(), "GetFOVAngle");
+        if (!fov.Run() || !manager.Get() || !camera.Get()) return false;
         Vec p = position.Out<Vec>("ReturnValue");
         Rot r = rotation.Out<Rot>("ReturnValue");
         const float setting = g_value[Fov];
@@ -790,22 +791,23 @@ public:
     }
     bool Apply(const photo::Pose& pose) override {
         if (!Active() || !photo::Valid(pose)) return false;
-        UObject* pc = s.photoController.Get();
-        UObject* camera = s.photoCamera.Get();
-        UObject* component = PhotoObject(camera, "CameraComponent", "CameraComponent");
+        const GenerationRef camera = s.photoCamera, controller = s.photoController;
+        const FreshObjectProperty component(camera, "CameraComponent", FindClass("CameraComponent"));
         const Vec p{pose.position[0], pose.position[1], pose.position[2]};
         const Rot r{pose.rotation[0], pose.rotation[1], pose.rotation[2]};
         // MoveFreeCam consumes controller rotation and camPos next tick. Update both paths.
-        if (!PhotoCall(pc, "SetControlRotation").Arg(0, r).Run()) return false;
-        auto move = PhotoCall(camera, "K2_SetActorLocationAndRotation");
+        if (!component.Get() || !PhotoCall(controller.Get(), "SetControlRotation").Arg(0, r).Run()) return false;
+        if (!component.Get() || !controller.Get()) return false;
+        auto move = PhotoCall(camera.Get(), "K2_SetActorLocationAndRotation");
         if (!move.Arg(0, p).Arg(1, r).Arg(2, false).Arg(4, true).Run() || !move.Out<bool>("ReturnValue")) return false;
         s.camPos = p;
         s.camAt = GetTickCount64();
-        if (!PhotoCall(component, "SetFieldOfView").Arg(0, pose.fov).Run()) return false;
+        if (!controller.Get() || !PhotoCall(component.Get(), "SetFieldOfView").Arg(0, pose.fov).Run()) return false;
         // The controller's explicit FOV lock wins over camera-component FOV. Restore that
         // setting too: locked bookmarks use the measured angle, unlocked ones release it.
         const float setting = pose.fovLocked ? pose.fov : 0.f;
-        if (!PhotoCall(pc, "FOV").Arg(0, setting).Run()) return false;
+        if (!component.Get() || !PhotoCall(controller.Get(), "FOV").Arg(0, setting).Run() ||
+            !component.Get() || !controller.Get()) return false;
         g_value[Fov] = setting;
         s.lastValue[Fov] = setting;
         return true; // dispatch accepted; the UI deliberately says requested

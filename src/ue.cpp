@@ -462,6 +462,7 @@ Prop FindProp(const UClass* structOrClass, const char* name, bool uncached)
     for (const void* s = structOrClass; s && !prop; s = SuperOf(s)) {
         for (auto* f = Read<const uint8_t*>(s, off::StructChildProps); f; f = Read<const uint8_t*>(f, off::FFieldNext)) {
             if (!NameEquals(f + off::FFieldName, name)) continue;
+            prop.field = f;
             prop.offset = Read<int32_t>(f, off::PropOffset);
             const void* fieldClass = Read<const void*>(f, off::FFieldClass);
             prop.elementSize = Read<int32_t>(f, 0x34); // FProperty::ElementSize (engine ABI)
@@ -596,6 +597,42 @@ GenerationRef::GenerationRef(UObject* o)
 UObject* GenerationRef::Get() const
 {
     return obj && serial > 0 && GenerationSerial(index) == serial && ObjectAt(index) == obj ? obj : nullptr;
+}
+
+FreshObjectProperty::FreshObjectProperty(const GenerationRef& owner, const char* name, const UClass* expectedClass)
+    : owner_(owner), name_(name), expectedClass_(expectedClass)
+{
+    UObject* object = owner_.Get();
+    property_ = object ? FindProp(ClassOf(object), name_.c_str(), true) : Prop{};
+    if (property_.Is(Prop::Kind::Object, sizeof(UObject*)))
+        SafeRead(reinterpret_cast<uint8_t*>(object) + property_.offset, &target_, sizeof(target_));
+    if (target_) SafeRead(reinterpret_cast<uint8_t*>(target_) + off::ObjIndex, &targetIndex_, sizeof(targetIndex_));
+    targetSerial_ = GenerationRef(target_).serial;
+}
+
+UObject* FreshObjectProperty::Get() const
+{
+    UObject* owner = owner_.Get();
+    if (!owner || IsDefaultObject(owner) || !target_ || !expectedClass_) return nullptr;
+    if (Read<int32_t>(owner, off::ObjIndex) != owner_.index) return nullptr;
+    const Prop current = FindProp(ClassOf(owner), name_.c_str(), true);
+    if (!current.Is(Prop::Kind::Object, sizeof(UObject*)) || !current.inner ||
+        current.offset != property_.offset || current.inner != property_.inner || current.field != property_.field) return nullptr;
+    UObject* target = nullptr;
+    if (!SafeRead(reinterpret_cast<uint8_t*>(owner) + current.offset, &target, sizeof(target)) || target != target_) return nullptr;
+    // A fresh strong property keeps this instance reachable during this game-thread operation.
+    // Its serial may be unassigned; it must never be promoted to a retained GenerationRef.
+    int32_t index = -1;
+    if (!SafeRead(reinterpret_cast<uint8_t*>(target) + off::ObjIndex, &index, sizeof(index)) ||
+        index != targetIndex_ || ObjectAt(index) != target || IsDefaultObject(target) || !IsA(target, expectedClass_) ||
+        !IsA(target, static_cast<const UClass*>(current.inner))) return nullptr;
+    int32_t serial = 0;
+    const uint8_t* chunk = g.chunks[index / g.perChunk]; // owner generation verified this layout
+    if (!chunk || !SafeRead(chunk + size_t(index % g.perChunk) * g.itemSize + 16, &serial, sizeof(serial)) ||
+        serial < 0 || (targetSerial_ > 0 && serial != targetSerial_)) return nullptr;
+    UObject* stillOwned = nullptr;
+    if (!SafeRead(reinterpret_cast<uint8_t*>(owner) + current.offset, &stillOwned, sizeof(stillOwned))) return nullptr;
+    return owner_.Get() == owner && stillOwned == target ? target : nullptr;
 }
 
 std::string FString::ToUtf8() const

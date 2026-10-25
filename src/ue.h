@@ -49,6 +49,7 @@ struct Prop {
     int32_t offset = -1;
     uint8_t boolMask = 0;       // non-zero for bool properties (bitfields included)
     const void* inner = nullptr; // struct properties: the UScriptStruct; object properties: the class
+    const void* field = nullptr; // reflected FField identity; fresh lookups can detect replacement
     Kind kind = Kind::Unknown;
     int32_t elementSize = 0, arrayDim = 0;
     bool Is(Kind expected, int32_t size) const { return bool(*this) && kind == expected && elementSize == size && arrayDim == 1; }
@@ -120,6 +121,22 @@ struct GenerationRef {
     GenerationRef() = default;
     explicit GenerationRef(UObject* o);
     UObject* Get() const;
+};
+
+// Game-thread, operation-local strong ObjectProperty lookup. Never store this in a snapshot,
+// bookmark or persistent state. Get() re-resolves the field/reference after each native call;
+// a changed field, target or retained owner's generation invalidates this operation.
+class FreshObjectProperty {
+public:
+    FreshObjectProperty(const GenerationRef& owner, const char* name, const UClass* expectedClass);
+    UObject* Get() const;
+private:
+    GenerationRef owner_;
+    std::string name_;
+    const UClass* expectedClass_ = nullptr;
+    Prop property_;
+    UObject* target_ = nullptr;
+    int32_t targetIndex_ = -1, targetSerial_ = 0;
 };
 
 struct FString { // TArray<wchar_t>
