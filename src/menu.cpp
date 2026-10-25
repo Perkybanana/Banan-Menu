@@ -836,14 +836,23 @@ void TabWorld(const feat::Snapshot& s)
     ImGui::BeginDisabled(!s.player);
     if (ImGui::Button(T("Kill enemies nearby"))) feat::KillNearby();
     ImGui::EndDisabled();
-    ImGui::BeginDisabled(!s.enemySpawnerReady);
-    if (ImGui::Button(T("Open enemy spawner"))) {
-        feat::OpenEnemySpawner();
-        g_open = false; // render-thread handoff: the native panel must receive input
+    Section("ENEMY SPAWNER");
+    static int enemyType = 0, enemyCount = 1; // local UI selection only; never persisted
+    ImGui::BeginDisabled(!s.enemySpawnerReady || s.enemySpawnerBusy);
+    ImGui::SetNextItemWidth(240 * S());
+    if (ImGui::BeginCombo(T("Enemy type"), T(spawn::Types[enemyType].label))) {
+        for (int i = 0; i < spawn::TypeCount; ++i)
+            if (ImGui::Selectable(T(spawn::Types[i].label), enemyType == i)) enemyType = i;
+        ImGui::EndCombo();
     }
+    ImGui::SetNextItemWidth(240 * S());
+    ImGui::SliderInt(T("Enemy count"), &enemyCount, 1, spawn::MaxCount, "%d", ImGuiSliderFlags_AlwaysClamp);
+    if (ImGui::Button(T("Spawn enemies"))) feat::SpawnEnemies(enemyType, enemyCount);
     ImGui::EndDisabled();
-    Hint("Opens the game's enemy panel and closes this menu. Insert / F8 reopens Banan Menu.");
+    Hint("Creates 1–5 selected enemies in front of you when space is available. The first class load may take a moment.");
+    if (s.enemySpawnerBusy) ImGui::TextWrapped("%s", T("Creating enemies..."));
     if (!s.enemySpawnerReady && !s.enemySpawnerWhy.empty()) ImGui::TextWrapped("%s", T(s.enemySpawnerWhy.c_str()));
+    if (s.enemySpawnerRequested) ImGui::Text(T("Created %d of %d enemies."), s.enemySpawnerCreated, s.enemySpawnerRequested);
     if (!s.enemySpawnerMessage.empty()) ImGui::TextWrapped("%s", T(s.enemySpawnerMessage.c_str()));
     Section("CAMERA & HUD");
     SliderRow(feat::Fov, "Field of view", "%.0f°", s, "Locks the camera field of view. Default gives control back to the game.",

@@ -8,6 +8,7 @@
 #include <vector>
 #include "resources_core.h"
 #include "presets_core.h"
+#include "spawn_core.h"
 
 namespace feat {
 
@@ -66,6 +67,8 @@ struct Snapshot {
     bool photoReady = false;
     std::string photoWhy, photoMessage;
     bool enemySpawnerReady = false;
+    bool enemySpawnerBusy = false;
+    int enemySpawnerCreated = 0, enemySpawnerRequested = 0;
     std::string enemySpawnerWhy, enemySpawnerMessage;
     std::array<std::string, 3> cameraBookmarks; // full map identity; session only
     std::array<bool, 3> cameraBookmarkRestorable{};
@@ -119,7 +122,7 @@ void SetResourceTotal(int materialIndex, int total);
 void GiveAllSkins();
 void SetShopLevel(int level);
 void KillNearby();
-void OpenEnemySpawner(); // requests the game's native panel; does not claim a spawn
+void SpawnEnemies(int type, int count); // fixed catalog ID and bounded 1..5; no arbitrary paths/classes
 void SaveSlot(int slot);
 void LoadSlot(int slot);
 void SaveCameraBookmark(int slot);

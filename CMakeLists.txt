@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(BananMenu VERSION 1.0.0 LANGUAGES C CXX ASM_MASM)
-set(BANAN_VERSION "1.0.0-dev.3")
+set(BANAN_VERSION "1.0.0-dev.4")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,6 +54,9 @@ target_link_libraries(BananMenu PRIVATE imgui minhook dxgi delayimp)
 target_link_options(BananMenu PRIVATE /DELAYLOAD:d3dcompiler_47.dll /DELAYLOAD:dxgi.dll)
 
 enable_testing()
+add_executable(spawn_test tests/spawn_test.cpp)
+target_compile_options(spawn_test PRIVATE /W4 /utf-8)
+add_test(NAME spawn_test COMMAND spawn_test)
 add_executable(photo_test tests/photo_test.cpp)
 target_compile_options(photo_test PRIVATE /W4 /utf-8)
 add_test(NAME photo_test COMMAND photo_test)

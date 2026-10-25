@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <string>
 
 namespace ue {
@@ -45,13 +46,14 @@ template <class F> void ForEachInstance(const UClass* cls, F&& f) // live gamepl
 }
 
 struct Prop {
-    enum class Kind { Unknown, Float, Double, Struct, Object };
+    enum class Kind { Unknown, Float, Double, Struct, Object, Int, Class, SoftClass, String, Enum };
     int32_t offset = -1;
     uint8_t boolMask = 0;       // non-zero for bool properties (bitfields included)
     const void* inner = nullptr; // struct properties: the UScriptStruct; object properties: the class
     const void* field = nullptr; // reflected FField identity; fresh lookups can detect replacement
     Kind kind = Kind::Unknown;
     int32_t elementSize = 0, arrayDim = 0;
+    uint64_t flags = 0;
     bool Is(Kind expected, int32_t size) const { return bool(*this) && kind == expected && elementSize == size && arrayDim == 1; }
     explicit operator bool() const { return offset >= 0; }
 };
@@ -59,6 +61,16 @@ struct Prop {
 Prop FindProp(const UClass* structOrClass, const char* name, bool uncached = false); // walks the Super chain
 int32_t StructSize(const UClass* structOrClass);               // bytes of one instance
 UFunction* FindFunction(const UClass* cls, const char* name, bool uncached = false);
+
+struct Parameter {
+    const char* name;
+    Prop::Kind kind;
+    int32_t size;
+    const char* inner = nullptr; // exact reflected struct/class/enum name when required
+    bool returns = false;
+};
+// Fresh exact parameter set, scalar types, return directions, identities and non-overlapping bounded slots.
+bool Signature(const UClass* cls, const char* function, std::initializer_list<Parameter> parameters);
 
 // Typed access to a property by name. Returns nullptr when the property doesn't exist (feature greys out).
 template <class T> T* Member(UObject* obj, const char* name)
@@ -137,6 +149,19 @@ private:
     Prop property_;
     UObject* target_ = nullptr;
     int32_t targetIndex_ = -1, targetSerial_ = 0;
+};
+
+// Operation-local deferred actor returned by the engine. Its positive-generation world
+// anchors the operation; a fresh serial-0 actor is never retained in gameplay/UI state.
+class FreshWorldActor {
+public:
+    FreshWorldActor(const GenerationRef& world, UObject* actor, const UClass* expectedClass);
+    UObject* Get() const;
+private:
+    GenerationRef world_;
+    UObject* actor_ = nullptr;
+    const UClass* expectedClass_ = nullptr;
+    int32_t index_ = -1, serial_ = 0;
 };
 
 struct FString { // TArray<wchar_t>

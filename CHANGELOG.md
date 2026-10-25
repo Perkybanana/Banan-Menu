@@ -1,8 +1,15 @@
 # Changes
 
+## 1.0.0-dev.4 — development candidate, 2026-10-25
+
+- Replaced the nonfunctional native panel with an explicit five-type World spawner, count 1–5, using reflected engine class conversion/loading and deferred actor construction. The menu stays open; nothing preloads/spawns automatically. Obstructed/failed creation stops the batch and reports the completed count. Actual spawning, AI and combat acceptance remain pending.
+- Fixed catalog comes from the game's helper defaults: Hellghoul, Exploding Hellghoul, Cambion, Cultist and Runner. New type/size/signature and operation-local world-ownership checks guard calls without weakening retained generation references. Added production-helper regressions for placement, bounds, signatures and newly created actor lifetimes.
+- Corrected native-panel diagnosis: the cheat-manager entry passes a null ObjectRef; the panel requires a configured helper Actor and spawners. Its standalone SpawnChosenEnemies graph also appears to skip count one. Dev.4 uses the verified engine construction primitives directly; it never over-spawns and deletes an extra actor.
+- Accepted camera/resources/profiles remain as recorded. Stable 1.0.0, arbitrary checkpoint starts, excluded combat/hand controls and unusual-content research retain their existing status.
+
 ## 1.0.0-dev.3 — development candidate, 2026-10-25
 
-- Added World → Open enemy spawner, using the game's existing Blueprint cheat-manager panel entry. The action is disabled without a validated playable world, controller/player ownership and expected native signature, and revalidates after queued dispatch and cheat-manager creation. The overlay closes on the render thread to hand input to the native panel; Insert/F8 still reopens it. Panel visibility and actual enemy spawning are pending gameplay acceptance.
+- Added World → Open enemy spawner using the existing Blueprint panel entry. **Failed user acceptance on Chapter5: the panel appeared, its type list was empty and Spawn did nothing.** Successful build/CI did not establish gameplay functionality. Dev.4 replaces this path.
 - Recorded user acceptance of dev.2 camera Save, move/rotate and Restore on Chapter5 on 2026-10-25, plus separate wrong-map Restore blocking after a menu/chapter transition without a crash. This does not establish all-slot, FOV or death-variant acceptance.
 - Arbitrary checkpoint starts remain canceled/outside the current scope; native episode/chapter selection remains. Recoil, attack speed and hand visibility were removed from the current work scope by owner decision. Unusual weapons/possible cut content remain research, without a functionality claim.
 - Stable 1.0.0 finalization remains postponed; this is a test candidate.

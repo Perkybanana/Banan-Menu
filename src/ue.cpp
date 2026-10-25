@@ -467,15 +467,23 @@ Prop FindProp(const UClass* structOrClass, const char* name, bool uncached)
             const void* fieldClass = Read<const void*>(f, off::FFieldClass);
             prop.elementSize = Read<int32_t>(f, 0x34); // FProperty::ElementSize (engine ABI)
             prop.arrayDim = Read<int32_t>(f, 0x30);
+            prop.flags = Read<uint64_t>(f, off::PropFlags);
             if (NameEquals(fieldClass, "FloatProperty")) prop.kind = Prop::Kind::Float;
             else if (NameEquals(fieldClass, "DoubleProperty")) prop.kind = Prop::Kind::Double;
             else if (NameEquals(fieldClass, "StructProperty")) prop.kind = Prop::Kind::Struct;
             else if (NameEquals(fieldClass, "ObjectProperty")) prop.kind = Prop::Kind::Object;
+            else if (NameEquals(fieldClass, "IntProperty")) prop.kind = Prop::Kind::Int;
+            else if (NameEquals(fieldClass, "ClassProperty")) prop.kind = Prop::Kind::Class;
+            else if (NameEquals(fieldClass, "SoftClassProperty")) prop.kind = Prop::Kind::SoftClass;
+            else if (NameEquals(fieldClass, "StrProperty")) prop.kind = Prop::Kind::String;
+            else if (NameEquals(fieldClass, "EnumProperty")) prop.kind = Prop::Kind::Enum;
             if (NameEquals(fieldClass, "BoolProperty")) { // FieldSize, ByteOffset, ByteMask, FieldMask
                 prop.offset += Read<uint8_t>(f, off::PropExtra + 1);
                 prop.boolMask = Read<uint8_t>(f, off::PropExtra + 2);
             } else {
                 prop.inner = Read<const void*>(f, off::PropExtra);
+                // FEnumProperty stores the underlying numeric FProperty followed by its UEnum.
+                if (prop.kind == Prop::Kind::Enum) prop.inner = Read<const void*>(f, off::PropExtra + sizeof(void*));
             }
             break;
         }
@@ -543,6 +551,31 @@ Call& Call::ArgRaw(int index, const void* data, size_t size)
 }
 
 int32_t StructSize(const UClass* s) { return s ? Read<int32_t>(s, off::StructSize) : 0; }
+
+bool Signature(const UClass* cls, const char* function, std::initializer_list<Parameter> parameters)
+{
+    const auto* fn = reinterpret_cast<const UClass*>(FindFunction(cls, function, true));
+    const int32_t size = StructSize(fn);
+    if (!fn || size < 0 || size > 4096) return false;
+    size_t count = 0, fields = 0;
+    for (auto* f = Read<const uint8_t*>(fn, off::StructChildProps); f; f = Read<const uint8_t*>(f, off::FFieldNext)) {
+        if (++fields > 64) return false;
+        if (Read<uint64_t>(f, off::PropFlags) & 0x80) ++count; // CPF_Parm
+    }
+    if (count != parameters.size()) return false;
+    std::vector<Prop> slots;
+    for (const auto& expected : parameters) {
+        const Prop p = FindProp(fn, expected.name, true);
+        if (!p.Is(expected.kind, expected.size) || !(p.flags & 0x80) || bool(p.flags & 0x400) != expected.returns ||
+            p.offset > size || p.elementSize > size - p.offset ||
+            (expected.inner && (!p.inner || Name(static_cast<const UObject*>(p.inner)) != expected.inner))) return false;
+        for (const Prop& previous : slots)
+            if (p.field == previous.field || (p.offset < previous.offset + previous.elementSize && previous.offset < p.offset + p.elementSize))
+                return false;
+        slots.push_back(p);
+    }
+    return parameters.size() != 0 || size == 0;
+}
 
 void* Call::Slot(const char* name)
 {
@@ -633,6 +666,29 @@ UObject* FreshObjectProperty::Get() const
     UObject* stillOwned = nullptr;
     if (!SafeRead(reinterpret_cast<uint8_t*>(owner) + current.offset, &stillOwned, sizeof(stillOwned))) return nullptr;
     return owner_.Get() == owner && stillOwned == target ? target : nullptr;
+}
+
+FreshWorldActor::FreshWorldActor(const GenerationRef& world, UObject* actor, const UClass* expectedClass)
+    : world_(world), actor_(actor), expectedClass_(expectedClass)
+{
+    if (actor_) SafeRead(reinterpret_cast<uint8_t*>(actor_) + off::ObjIndex, &index_, sizeof(index_));
+    serial_ = GenerationRef(actor_).serial;
+}
+
+UObject* FreshWorldActor::Get() const
+{
+    UObject* world = world_.Get();
+    if (!world || Read<int32_t>(world, off::ObjIndex) != world_.index || IsDefaultObject(world) ||
+        !IsA(world, FindClass("World")) || !actor_ || !expectedClass_ ||
+        ObjectAt(index_) != actor_ || Read<int32_t>(actor_, off::ObjIndex) != index_ || IsDefaultObject(actor_) ||
+        ClassOf(actor_) != expectedClass_) return nullptr;
+    UObject* level = OuterOf(actor_);
+    if (!level || !IsA(level, FindClass("Level")) || OuterOf(level) != world) return nullptr;
+    int32_t currentSerial = -1;
+    const uint8_t* chunk = g.chunks[index_ / g.perChunk]; // positive world generation verified the object-array ABI
+    if (!chunk || !SafeRead(chunk + size_t(index_ % g.perChunk) * g.itemSize + 16, &currentSerial, sizeof(currentSerial)) ||
+        currentSerial < 0 || (serial_ > 0 && currentSerial != serial_)) return nullptr;
+    return world_.Get() == world && ObjectAt(index_) == actor_ ? actor_ : nullptr;
 }
 
 std::string FString::ToUtf8() const

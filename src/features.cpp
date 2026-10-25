@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <functional>
 #include <initializer_list>
 #include <map>
@@ -98,6 +99,7 @@ struct SpawnerContext {
     const char* Why() const;
 };
 SpawnerContext g_spawnerContext;
+std::atomic<bool> g_spawnerBusy{false};
 
 // A give that dropped items: copies beyond the asked amount are removed, also those the game spawns a moment later.
 struct DropWatch {
@@ -137,6 +139,7 @@ struct State {
     photo::Bookmarks cameraBookmarks;
     const char* photoMessage = "";
     const char* enemySpawnerMessage = "";
+    int enemySpawnerCreated = 0, enemySpawnerRequested = 0;
     Vec camPos{};
     uint64_t camAt = 0;
     float jumpZ = 0;
@@ -333,14 +336,6 @@ bool CheatCall(const char* fn)
     return ok;
 }
 
-// The Blueprint override has no inputs/outputs. Do not fall back to the empty native event.
-bool SpawnerSignature(const UClass* cls)
-{
-    auto* fn = FindFunction(cls, "K2_SpawnerWidget", true);
-    return fn && OuterOf(reinterpret_cast<UObject*>(fn)) == reinterpret_cast<const UObject*>(cls) &&
-        StructSize(reinterpret_cast<const UClass*>(fn)) == 0;
-}
-
 const char* SpawnerContext::Why() const
 {
     if (!Ready()) return "Game engine not hooked: see BananMenu.log.";
@@ -353,22 +348,78 @@ const char* SpawnerContext::Why() const
         FreshObjectProperty(controller, "Pawn", FindClass("PlayerCharacter")).Get() != pawn ||
         OuterOf(OuterOf(pawn)) != levelWorld || OuterOf(OuterOf(pc)) != levelWorld)
         return "Enemy spawner unavailable: load a playable level first.";
-    UClass* cls = FindClass("BP_InfernoCheatManager_C");
-    const Prop property = FindProp(ClassOf(pc), "CheatManager", true);
-    if (!cls || !property.Is(Prop::Kind::Object, sizeof(UObject*)) || !property.inner ||
-        !IsChildOf(cls, static_cast<const UClass*>(property.inner)) || !SpawnerSignature(cls))
-        return "Native enemy spawner API unavailable.";
-    UObject* manager = nullptr;
-    if (!SafeRead(reinterpret_cast<uint8_t*>(pc) + property.offset, &manager, sizeof(manager)))
-        return "Native enemy spawner API unavailable.";
-    if (manager) {
-        const FreshObjectProperty fresh(controller, "CheatManager", cls);
-        if (!fresh.Get() || OuterOf(fresh.Get()) != pc || !SpawnerSignature(ClassOf(fresh.Get())))
-            return "Native enemy spawner API unavailable.";
-    } else if (s.cheatTried) {
-        return "Native enemy spawner API unavailable.";
-    }
     return "";
+}
+
+using Kind = Prop::Kind;
+const std::initializer_list<Parameter> kMakeClassPath = {
+    {"PathString", Kind::String, 16}, {"ReturnValue", Kind::Struct, 32, "SoftClassPath", true}};
+const std::initializer_list<Parameter> kMakeSoftClass = {
+    {"SoftClassPath", Kind::Struct, 32, "SoftClassPath"}, {"ReturnValue", Kind::SoftClass, 40, "Class", true}};
+const std::initializer_list<Parameter> kLoadEnemyClass = {
+    {"AssetClass", Kind::SoftClass, 40, "Class"}, {"ReturnValue", Kind::Class, 8, "Class", true}};
+const std::initializer_list<Parameter> kMakeSpawnTransform = {
+    {"Location", Kind::Struct, 24, "Vector"}, {"Rotation", Kind::Struct, 24, "Rotator"},
+    {"Scale", Kind::Struct, 24, "Vector"}, {"ReturnValue", Kind::Struct, 96, "Transform", true}};
+const std::initializer_list<Parameter> kBeginEnemy = {
+    {"WorldContextObject", Kind::Object, 8, "Object"}, {"ActorClass", Kind::Class, 8, "Class"},
+    {"SpawnTransform", Kind::Struct, 96, "Transform"},
+    {"CollisionHandlingOverride", Kind::Enum, 1, "ESpawnActorCollisionHandlingMethod"},
+    {"Owner", Kind::Object, 8, "Actor"}, {"TransformScaleMethod", Kind::Enum, 1, "ESpawnActorScaleMethod"},
+    {"ReturnValue", Kind::Object, 8, "Actor", true}};
+const std::initializer_list<Parameter> kFinishEnemy = {
+    {"Actor", Kind::Object, 8, "Actor"}, {"SpawnTransform", Kind::Struct, 96, "Transform"},
+    {"TransformScaleMethod", Kind::Enum, 1, "ESpawnActorScaleMethod"}, {"ReturnValue", Kind::Object, 8, "Actor", true}};
+
+Call SpawnerCall(UObject* object, const char* function, std::initializer_list<Parameter> parameters)
+{
+    return Call(object && Signature(ClassOf(object), function, parameters) ? object : nullptr, function, true);
+}
+
+UObject* SpawnerLibrary(const char* name)
+{
+    UObject* object = Cdo(name);
+    return object && IsA(object, FindClass(name)) && IsDefaultObject(object) ? object : nullptr;
+}
+
+bool SpawnerAPIs()
+{
+    return FindClass("EnemyCharacter") &&
+        Signature(FindClass("KismetSystemLibrary"), "MakeSoftClassPath", kMakeClassPath) &&
+        Signature(FindClass("KismetSystemLibrary"), "Conv_SoftClassPathToSoftClassRef", kMakeSoftClass) &&
+        Signature(FindClass("KismetSystemLibrary"), "LoadClassAsset_Blocking", kLoadEnemyClass) &&
+        Signature(FindClass("KismetMathLibrary"), "MakeTransform", kMakeSpawnTransform) &&
+        Signature(FindClass("GameplayStatics"), "BeginDeferredActorSpawnFromClass", kBeginEnemy) &&
+        Signature(FindClass("GameplayStatics"), "FinishSpawningActor", kFinishEnemy) &&
+        Signature(FindClass("Actor"), "K2_GetActorLocation", {{"ReturnValue", Kind::Struct, 24, "Vector", true}}) &&
+        Signature(FindClass("Actor"), "GetActorForwardVector", {{"ReturnValue", Kind::Struct, 24, "Vector", true}}) &&
+        Signature(FindClass("Actor"), "K2_GetActorRotation", {{"ReturnValue", Kind::Struct, 24, "Rotator", true}}) &&
+        Signature(FindClass("Actor"), "K2_DestroyActor", {});
+}
+
+bool SpawnerRun(Call& call)
+{
+    bool ran = false;
+    std::function<void()> invoke = [&] { ran = call.Run(); };
+    return Guard(invoke) && ran;
+}
+
+// Reacquire by exact generated-class identity after native calls; never retain a raw asset pointer.
+UClass* SelectedEnemyClass(int type)
+{
+    const std::string path = spawn::Types[type].path;
+    UClass* cls = FindClass(path.substr(path.find_last_of('.') + 1).c_str());
+    if (!cls || !IsChildOf(cls, FindClass("EnemyCharacter"))) return nullptr;
+    std::string actual;
+    std::vector<UObject*> seen;
+    for (UObject* object = reinterpret_cast<UObject*>(cls); object; object = OuterOf(object)) {
+        if (seen.size() >= 32 || std::find(seen.begin(), seen.end(), object) != seen.end()) return nullptr;
+        seen.push_back(object);
+        const std::string name = Name(object);
+        if (name.empty()) return nullptr;
+        actual = actual.empty() ? name : name + "." + actual;
+    }
+    return actual == path ? cls : nullptr;
 }
 
 UObject* ItemManager()
@@ -1665,8 +1716,12 @@ void Tick()
     const SpawnerContext spawner{GenerationRef(s.pc.Get()), GenerationRef(s.player.Get()),
         GenerationRef(player ? OuterOf(OuterOf(player)) : nullptr)};
     snap.enemySpawnerWhy = spawner.Why();
-    snap.enemySpawnerReady = snap.enemySpawnerWhy.empty();
+    if (snap.enemySpawnerWhy.empty() && !SpawnerAPIs()) snap.enemySpawnerWhy = "Native enemy spawner API unavailable.";
+    snap.enemySpawnerBusy = g_spawnerBusy.load();
+    snap.enemySpawnerReady = snap.enemySpawnerWhy.empty() && !snap.enemySpawnerBusy;
     snap.enemySpawnerMessage = s.enemySpawnerMessage;
+    snap.enemySpawnerCreated = s.enemySpawnerCreated;
+    snap.enemySpawnerRequested = s.enemySpawnerRequested;
     const std::string photoMap = snap.photoReady ? photoCamera.Map() : "";
     for (int i = 0; i < 3; ++i) {
         const auto& mark = s.cameraBookmarks.Slots()[i];
@@ -1715,32 +1770,116 @@ void DeleteCameraBookmark(int slot)
     RunOnGameThread([slot] { s.photoMessage = PhotoMessage(s.cameraBookmarks.Delete(slot)); });
 }
 
-void OpenEnemySpawner()
+void SpawnEnemies(int type, int count)
 {
+    if (!spawn::ValidRequest(type, count)) { menu::Toast(lang::T("Invalid enemy type or count.")); return; }
+    if (g_spawnerBusy.exchange(true)) return;
     SpawnerContext context;
     {
         std::lock_guard lock(g_snapMutex);
         context = g_spawnerContext;
     }
-    RunOnGameThread([context] {
-        auto report = [](const char* message) {
-            s.enemySpawnerMessage = message;
-            menu::Toast(lang::T(message));
-            km::Log("Enemy spawner: %s", message);
+    RunOnGameThread([context, type, count] {
+        struct BusyReset { ~BusyReset() { g_spawnerBusy = false; } } reset;
+        int created = 0;
+        const char* message = "Enemy creation failed or was blocked.";
+        std::function<void()> work = [&] {
+            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+            if (!SpawnerAPIs()) { message = "Native enemy spawner API unavailable."; return; }
+            // Opaque returned structs remain alive through the dependent synchronous calls.
+            const std::string path = spawn::Types[type].path;
+            std::wstring wide(path.begin(), path.end());
+            FString input{wide.data(), int32_t(wide.size() + 1), int32_t(wide.size() + 1)};
+            auto makePath = SpawnerCall(SpawnerLibrary("KismetSystemLibrary"), "MakeSoftClassPath", kMakeClassPath);
+            makePath.Arg("PathString", input);
+            if (!SpawnerRun(makePath)) { message = "Enemy class load failed."; return; }
+            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+            const auto classPath = makePath.Out<std::array<uint8_t, 32>>("ReturnValue");
+            auto makeSoft = SpawnerCall(SpawnerLibrary("KismetSystemLibrary"), "Conv_SoftClassPathToSoftClassRef", kMakeSoftClass);
+            makeSoft.ArgRaw(0, classPath.data(), classPath.size());
+            if (!SpawnerRun(makeSoft)) { message = "Enemy class load failed."; return; }
+            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+            const auto softClass = makeSoft.Out<std::array<uint8_t, 40>>("ReturnValue");
+            auto load = SpawnerCall(SpawnerLibrary("KismetSystemLibrary"), "LoadClassAsset_Blocking", kLoadEnemyClass);
+            load.ArgRaw(0, softClass.data(), softClass.size());
+            if (!SpawnerRun(load)) { message = "Enemy class load failed."; return; }
+            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+            UClass* selected = SelectedEnemyClass(type);
+            if (!selected || load.Out<UObject*>("ReturnValue") != reinterpret_cast<UObject*>(selected)) {
+                message = "Enemy class load failed."; return;
+            }
+            auto position = SpawnerCall(context.player.Get(), "K2_GetActorLocation", {{"ReturnValue", Kind::Struct, 24, "Vector", true}});
+            if (!SpawnerRun(position)) { message = "Player pose unavailable; nothing spawned."; return; }
+            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+            auto forward = SpawnerCall(context.player.Get(), "GetActorForwardVector", {{"ReturnValue", Kind::Struct, 24, "Vector", true}});
+            if (!SpawnerRun(forward)) { message = "Player pose unavailable; nothing spawned."; return; }
+            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+            auto rotation = SpawnerCall(context.player.Get(), "K2_GetActorRotation", {{"ReturnValue", Kind::Struct, 24, "Rotator", true}});
+            if (!SpawnerRun(rotation)) { message = "Player pose unavailable; nothing spawned."; return; }
+            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+            std::array<spawn::Point, spawn::MaxCount> positions{};
+            const Rot facing = rotation.Out<Rot>("ReturnValue");
+            if (!spawn::Finite({facing.pitch, facing.yaw, facing.roll}) ||
+                !spawn::Positions(position.Out<spawn::Point>("ReturnValue"), forward.Out<spawn::Point>("ReturnValue"), count, positions)) {
+                message = "Player pose unavailable; nothing spawned."; return;
+            }
+            for (int i = 0; i < count; ++i) {
+                if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+                auto transform = SpawnerCall(SpawnerLibrary("KismetMathLibrary"), "MakeTransform", kMakeSpawnTransform);
+                transform.Arg("Location", positions[i]).Arg("Rotation", Rot{0, facing.yaw, 0}).Arg("Scale", Vec{1, 1, 1});
+                if (!SpawnerRun(transform)) return;
+                if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+                selected = SelectedEnemyClass(type);
+                if (!selected) { message = "Enemy class load failed."; return; }
+                const auto pose = transform.Out<std::array<uint8_t, 96>>("ReturnValue");
+                auto begin = SpawnerCall(SpawnerLibrary("GameplayStatics"), "BeginDeferredActorSpawnFromClass", kBeginEnemy);
+                begin.Arg("WorldContextObject", context.player.Get()).Arg("ActorClass", selected).Arg("SpawnTransform", pose)
+                    .Arg("CollisionHandlingOverride", uint8_t(3)).Arg("Owner", static_cast<UObject*>(nullptr))
+                    .Arg("TransformScaleMethod", uint8_t(0));
+                const bool began = SpawnerRun(begin);
+                const FreshWorldActor actor(context.world, begin.Out<UObject*>("ReturnValue"), selected);
+                struct DeferredCleanup {
+                    const FreshWorldActor& actor;
+                    bool completed = false;
+                    ~DeferredCleanup() {
+                        if (completed) return;
+                        std::function<void()> cleanup = [&] {
+                            if (UObject* live = actor.Get()) {
+                                auto destroy = SpawnerCall(live, "K2_DestroyActor", {});
+                                if (!SpawnerRun(destroy)) km::Log("Enemy spawner: deferred actor cleanup failed");
+                            }
+                        };
+                        if (!Guard(cleanup)) km::Log("Enemy spawner: deferred actor cleanup faulted");
+                    }
+                } cleanup{actor};
+                if (!began) return;
+                if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+                if (!actor.Get()) return;
+                auto finish = SpawnerCall(SpawnerLibrary("GameplayStatics"), "FinishSpawningActor", kFinishEnemy);
+                finish.Arg("Actor", actor.Get()).Arg("SpawnTransform", pose).Arg("TransformScaleMethod", uint8_t(0));
+                if (!SpawnerRun(finish)) return;
+                if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+                UObject* completed = actor.Get();
+                if (!completed || finish.Out<UObject*>("ReturnValue") != completed || !IsA(completed, FindClass("EnemyCharacter"))) {
+                    return;
+                }
+                ++created;
+                cleanup.completed = true;
+                const Prop controller = FindProp(ClassOf(completed), "Controller", true);
+                UObject* ai = nullptr;
+                if (controller.Is(Kind::Object, sizeof(UObject*))) SafeRead(reinterpret_cast<uint8_t*>(completed) + controller.offset, &ai, sizeof(ai));
+                km::Log("Enemy spawner: completed %s; Controller %s", Name(reinterpret_cast<UObject*>(ClassOf(completed))).c_str(), ai ? "present" : "absent");
+            }
+            message = "Actors created; check enemy behavior in game.";
         };
-        const char* why = context.Why();
-        if (*why) { report(why); return; }
-        // Existing creation is explicit only. Never retain its returned zero-serial target.
-        if (!CheatManager()) { report("Enemy spawner request failed."); return; }
-        if (*context.Why()) { report("Enemy spawner request failed."); return; }
-        const FreshObjectProperty manager(context.controller, "CheatManager", FindClass("BP_InfernoCheatManager_C"));
-        UObject* object = manager.Get();
-        if (!object || OuterOf(object) != context.controller.Get() || !SpawnerSignature(ClassOf(object))) {
-            report("Enemy spawner request failed."); return;
-        }
-        auto open = Call(manager.Get(), "K2_SpawnerWidget", true);
-        const bool requested = manager.Get() && !*context.Why() && open.Run();
-        report(requested ? "Enemy spawner panel requested; check the game UI." : "Enemy spawner request failed.");
+        if (!Guard(work)) message = "Enemy creation failed or was blocked.";
+        s.enemySpawnerCreated = created;
+        s.enemySpawnerRequested = count;
+        s.enemySpawnerMessage = message;
+        char status[256];
+        std::snprintf(status, sizeof(status), lang::T("Created %d of %d enemies. %s"), created, count, lang::T(message));
+        menu::Toast(status);
+        km::Log("Enemy spawner: created %d of %d; %s", created, count, message);
     });
 }
 
@@ -1751,6 +1890,8 @@ Snapshot GetSnapshot()
         std::lock_guard lock(g_snapMutex);
         snap = g_snap;
     }
+    snap.enemySpawnerBusy = g_spawnerBusy.load();
+    snap.enemySpawnerReady = snap.enemySpawnerReady && !snap.enemySpawnerBusy;
     if (!Ready() && GetEnvironmentVariableA("KM_PREVIEW", nullptr, 0)) { // test host: sample values for screenshots
         snap.reflection = snap.player = snap.cheatManager = true;
         snap.health = 74, snap.maxHealth = 100, snap.suffering = 45, snap.maxSuffering = 100;
