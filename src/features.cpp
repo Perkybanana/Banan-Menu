@@ -92,6 +92,13 @@ constexpr uint8_t SlateHidden = 2, SlateCollapsed = 1;
 std::mutex g_snapMutex;
 Snapshot g_snap;
 
+// Copied under the snapshot mutex for a click; dereferenced only on the game thread.
+struct SpawnerContext {
+    GenerationRef controller, player, world;
+    const char* Why() const;
+};
+SpawnerContext g_spawnerContext;
+
 // A give that dropped items: copies beyond the asked amount are removed, also those the game spawns a moment later.
 struct DropWatch {
     UObject* item;
@@ -129,6 +136,7 @@ struct State {
     GenerationRef photoCamera, photoController, photoPlayer, photoWorld;
     photo::Bookmarks cameraBookmarks;
     const char* photoMessage = "";
+    const char* enemySpawnerMessage = "";
     Vec camPos{};
     uint64_t camAt = 0;
     float jumpZ = 0;
@@ -323,6 +331,44 @@ bool CheatCall(const char* fn)
     bool ok = c && c.Run();
     km::Log("Cheat %s: %s", fn, ok ? "called" : "unavailable");
     return ok;
+}
+
+// The Blueprint override has no inputs/outputs. Do not fall back to the empty native event.
+bool SpawnerSignature(const UClass* cls)
+{
+    auto* fn = FindFunction(cls, "K2_SpawnerWidget", true);
+    return fn && OuterOf(reinterpret_cast<UObject*>(fn)) == reinterpret_cast<const UObject*>(cls) &&
+        StructSize(reinterpret_cast<const UClass*>(fn)) == 0;
+}
+
+const char* SpawnerContext::Why() const
+{
+    if (!Ready()) return "Game engine not hooked: see BananMenu.log.";
+    UObject* pc = controller.Get();
+    UObject* pawn = player.Get();
+    UObject* levelWorld = world.Get();
+    if (!pc || !pawn || !levelWorld || pc != s.pc.Get() || pawn != s.player.Get() ||
+        IsDefaultObject(pc) || IsDefaultObject(pawn) || IsDefaultObject(levelWorld) ||
+        !IsA(pc, FindClass("CoreController")) || !IsA(levelWorld, FindClass("World")) ||
+        FreshObjectProperty(controller, "Pawn", FindClass("PlayerCharacter")).Get() != pawn ||
+        OuterOf(OuterOf(pawn)) != levelWorld || OuterOf(OuterOf(pc)) != levelWorld)
+        return "Enemy spawner unavailable: load a playable level first.";
+    UClass* cls = FindClass("BP_InfernoCheatManager_C");
+    const Prop property = FindProp(ClassOf(pc), "CheatManager", true);
+    if (!cls || !property.Is(Prop::Kind::Object, sizeof(UObject*)) || !property.inner ||
+        !IsChildOf(cls, static_cast<const UClass*>(property.inner)) || !SpawnerSignature(cls))
+        return "Native enemy spawner API unavailable.";
+    UObject* manager = nullptr;
+    if (!SafeRead(reinterpret_cast<uint8_t*>(pc) + property.offset, &manager, sizeof(manager)))
+        return "Native enemy spawner API unavailable.";
+    if (manager) {
+        const FreshObjectProperty fresh(controller, "CheatManager", cls);
+        if (!fresh.Get() || OuterOf(fresh.Get()) != pc || !SpawnerSignature(ClassOf(fresh.Get())))
+            return "Native enemy spawner API unavailable.";
+    } else if (s.cheatTried) {
+        return "Native enemy spawner API unavailable.";
+    }
+    return "";
 }
 
 UObject* ItemManager()
@@ -1616,6 +1662,11 @@ void Tick()
     snap.photoWhy = photoCamera.Why();
     snap.photoReady = snap.reflection && snap.photoWhy.empty();
     snap.photoMessage = s.photoMessage;
+    const SpawnerContext spawner{GenerationRef(s.pc.Get()), GenerationRef(s.player.Get()),
+        GenerationRef(player ? OuterOf(OuterOf(player)) : nullptr)};
+    snap.enemySpawnerWhy = spawner.Why();
+    snap.enemySpawnerReady = snap.enemySpawnerWhy.empty();
+    snap.enemySpawnerMessage = s.enemySpawnerMessage;
     const std::string photoMap = snap.photoReady ? photoCamera.Map() : "";
     for (int i = 0; i < 3; ++i) {
         const auto& mark = s.cameraBookmarks.Slots()[i];
@@ -1625,6 +1676,7 @@ void Tick()
 
     std::lock_guard lock(g_snapMutex);
     g_snap = std::move(snap);
+    g_spawnerContext = spawner;
 }
 
 template <class F> void OnGame(F&& f)
@@ -1663,6 +1715,35 @@ void DeleteCameraBookmark(int slot)
     RunOnGameThread([slot] { s.photoMessage = PhotoMessage(s.cameraBookmarks.Delete(slot)); });
 }
 
+void OpenEnemySpawner()
+{
+    SpawnerContext context;
+    {
+        std::lock_guard lock(g_snapMutex);
+        context = g_spawnerContext;
+    }
+    RunOnGameThread([context] {
+        auto report = [](const char* message) {
+            s.enemySpawnerMessage = message;
+            menu::Toast(lang::T(message));
+            km::Log("Enemy spawner: %s", message);
+        };
+        const char* why = context.Why();
+        if (*why) { report(why); return; }
+        // Existing creation is explicit only. Never retain its returned zero-serial target.
+        if (!CheatManager()) { report("Enemy spawner request failed."); return; }
+        if (*context.Why()) { report("Enemy spawner request failed."); return; }
+        const FreshObjectProperty manager(context.controller, "CheatManager", FindClass("BP_InfernoCheatManager_C"));
+        UObject* object = manager.Get();
+        if (!object || OuterOf(object) != context.controller.Get() || !SpawnerSignature(ClassOf(object))) {
+            report("Enemy spawner request failed."); return;
+        }
+        auto open = Call(manager.Get(), "K2_SpawnerWidget", true);
+        const bool requested = manager.Get() && !*context.Why() && open.Run();
+        report(requested ? "Enemy spawner panel requested; check the game UI." : "Enemy spawner request failed.");
+    });
+}
+
 Snapshot GetSnapshot()
 {
     Snapshot snap;
@@ -1684,6 +1765,8 @@ Snapshot GetSnapshot()
     if (!Ready()) {
         snap.reflection = false;
         snap.photoReady = false;
+        snap.enemySpawnerReady = false;
+        snap.enemySpawnerWhy = "Game engine not hooked: see BananMenu.log.";
         snap.cameraBookmarkRestorable.fill(false);
         snap.why.fill("Game engine not hooked: see BananMenu.log.");
         snap.valueWhy.fill("Game engine not hooked: see BananMenu.log.");

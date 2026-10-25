@@ -28,6 +28,12 @@ std::atomic<int> g_lang{En};
 // Columns: en, zh, ja, ko, ru, de, fr, es, pt. Keep printf specifiers (%d, %s) as they are.
 const char* const kTable[][Count] = {
     // Banan Menu additions; other languages use English until translated.
+    {"Open enemy spawner", nullptr, nullptr, nullptr, "Открыть создание врагов", nullptr, nullptr, nullptr, nullptr},
+    {"Opens the game's enemy panel and closes this menu. Insert / F8 reopens Banan Menu.", nullptr, nullptr, nullptr, "Открывает игровую панель создания врагов и закрывает это меню. Insert / F8 снова открывает Banan Menu.", nullptr, nullptr, nullptr, nullptr},
+    {"Enemy spawner unavailable: load a playable level first.", nullptr, nullptr, nullptr, "Создание врагов недоступно: сначала загрузи игровой уровень.", nullptr, nullptr, nullptr, nullptr},
+    {"Native enemy spawner API unavailable.", nullptr, nullptr, nullptr, "Штатная функция создания врагов недоступна.", nullptr, nullptr, nullptr, nullptr},
+    {"Enemy spawner request failed.", nullptr, nullptr, nullptr, "Не удалось отправить запрос на панель создания врагов.", nullptr, nullptr, nullptr, nullptr},
+    {"Enemy spawner panel requested; check the game UI.", nullptr, nullptr, nullptr, "Запрос на панель создания врагов отправлен. Проверь интерфейс игры.", nullptr, nullptr, nullptr, nullptr},
     {"CAMERA BOOKMARKS", nullptr, nullptr, nullptr, "ЗАКЛАДКИ КАМЕРЫ", nullptr, nullptr, nullptr, nullptr},
     {"Three session-only views. Enable free camera first. Restoring also restores the saved FOV lock setting.", nullptr, nullptr, nullptr, "Три вида на время сеанса. Сначала включи свободную камеру. Восстановление также возвращает сохранённую фиксацию угла обзора.", nullptr, nullptr, nullptr, nullptr},
     {"Camera %d", nullptr, nullptr, nullptr, "Камера %d", nullptr, nullptr, nullptr, nullptr},

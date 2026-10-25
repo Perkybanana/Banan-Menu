@@ -1,6 +1,6 @@
 # Banan Menu for Hellraiser: Revival
 
-**1.0.0-dev.2 is a development build for the Windows Steam game, not a verified stable 1.0.0 release.** Native episode/chapter selection is supported; arbitrary checkpoint starts are outside the current scope. The user reported that camera bookmarks were unavailable in dev.1. The diagnosed strong-property resolution failure has a source fix and offline tests; dev.2 native acceptance is pending.
+**1.0.0-dev.3 is a development candidate for the Windows Steam game, not a verified stable 1.0.0 release.** The World section now requests the game's native enemy-spawner panel; opening that panel and spawning enemies still require gameplay acceptance. Native episode/chapter selection is supported; arbitrary checkpoint starts are outside the current scope.
 
 [Русская версия](README.ru.md) · [Changes](CHANGELOG.md) · [Verification scope](docs/VERIFICATION.md)
 
@@ -11,9 +11,10 @@
 - ESP for enemies, items, containers and save points.
 - Inventory: money, six carried crafting-material totals (0..9999), item browser, favorites and explicit item kits; settings profiles with local persistence.
 - Progress controls for current objectives, shop level and Steam achievements; native chapter selection remains available. Language, scaling and hotkeys are configurable.
-- Three guarded, session-only camera bookmarks are present in the source. Their in-game behavior still needs acceptance.
+- Three guarded, session-only camera bookmarks. On 2026-10-25 the user accepted dev.2 Save, move/rotate and Restore on Chapter5, and separately accepted wrong-map Restore blocking after a menu/chapter transition without a crash. Other slots, FOV and death variants have not all been tested.
+- World → Open enemy spawner requests the existing native panel and closes Banan Menu to hand over input. Insert/F8 reopens Banan Menu. This new entry remains a test candidate; a successful request does not confirm a visible panel or spawned enemies.
 
-Available controls depend on the current player/map and supported native game interfaces. Kits request item delivery and may encounter the existing native capacity/drop behavior; they are not atomic equip/loadouts. Teleporting to a live checkpoint does not start a complete story state. Recoil, attack speed, hand visibility, enemy spawning and cut-item functionality remain deferred.
+Available controls depend on the current player/map and supported native game interfaces. Kits request item delivery and may encounter the existing native capacity/drop behavior; they are not atomic equip/loadouts. Teleporting to a live checkpoint does not start a complete story state. Recoil, attack speed and hand visibility were removed from the current work scope by owner decision. Unusual weapons and possible cut content remain research; their functionality is not confirmed.
 
 ## Install, update and remove
 
@@ -36,7 +37,7 @@ ctest --test-dir build -C Release --output-on-failure
 powershell -NoProfile -File scripts/package.ps1 -BuildDirectory build -OutputDirectory packages
 ```
 
-The packager accepts only the normal Release DLL and the documentation/license allowlist. It produces `BananMenu-1.0.0-dev.2-win64.zip` and a JSON hash/size manifest with the source commit and candidate version. Existing targets cause a failure unless `-Force` is explicitly supplied. Compare the extracted DLL's SHA-256 with the manifest before installation. Consult the release notes for the candidate you install and the [recorded scan evidence](docs/VERIFICATION.md). A scan result applies only to its exact recorded DLL hash; a different build needs its own evidence. Scanning does not guarantee absence of all malicious code or establish in-game acceptance.
+The packager accepts only the normal Release DLL and the documentation/license allowlist. It produces `BananMenu-1.0.0-dev.3-win64.zip` and a JSON hash/size manifest with the source commit and candidate version. Existing targets cause a failure unless `-Force` is explicitly supplied. Compare the extracted DLL's SHA-256 with the manifest before installation. Consult the release notes for the candidate you install and the [recorded scan evidence](docs/VERIFICATION.md). A scan result applies only to its exact recorded DLL hash; a different build needs its own evidence. Scanning does not guarantee absence of all malicious code or establish in-game acceptance.
 
 The Windows workflow builds, tests and uploads a development artifact; it does not publish a GitHub Release. For contributions, keep game mutations on the game thread, render from copied snapshots, and add user-facing RU/EN text to `src/lang.cpp`. Run the build and tests above and describe the actual runtime verification performed.
 

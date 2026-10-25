@@ -65,6 +65,8 @@ struct Snapshot {
     std::array<std::string, 3> slots; // "" = empty, else map name
     bool photoReady = false;
     std::string photoWhy, photoMessage;
+    bool enemySpawnerReady = false;
+    std::string enemySpawnerWhy, enemySpawnerMessage;
     std::array<std::string, 3> cameraBookmarks; // full map identity; session only
     std::array<bool, 3> cameraBookmarkRestorable{};
 };
@@ -117,6 +119,7 @@ void SetResourceTotal(int materialIndex, int total);
 void GiveAllSkins();
 void SetShopLevel(int level);
 void KillNearby();
+void OpenEnemySpawner(); // requests the game's native panel; does not claim a spawn
 void SaveSlot(int slot);
 void LoadSlot(int slot);
 void SaveCameraBookmark(int slot);

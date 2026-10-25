@@ -836,6 +836,15 @@ void TabWorld(const feat::Snapshot& s)
     ImGui::BeginDisabled(!s.player);
     if (ImGui::Button(T("Kill enemies nearby"))) feat::KillNearby();
     ImGui::EndDisabled();
+    ImGui::BeginDisabled(!s.enemySpawnerReady);
+    if (ImGui::Button(T("Open enemy spawner"))) {
+        feat::OpenEnemySpawner();
+        g_open = false; // render-thread handoff: the native panel must receive input
+    }
+    ImGui::EndDisabled();
+    Hint("Opens the game's enemy panel and closes this menu. Insert / F8 reopens Banan Menu.");
+    if (!s.enemySpawnerReady && !s.enemySpawnerWhy.empty()) ImGui::TextWrapped("%s", T(s.enemySpawnerWhy.c_str()));
+    if (!s.enemySpawnerMessage.empty()) ImGui::TextWrapped("%s", T(s.enemySpawnerMessage.c_str()));
     Section("CAMERA & HUD");
     SliderRow(feat::Fov, "Field of view", "%.0f°", s, "Locks the camera field of view. Default gives control back to the game.",
               "Default");
