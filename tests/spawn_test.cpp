@@ -2,9 +2,134 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <string>
+#include <vector>
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "%d: %s\n", __LINE__, #x); std::exit(1); } } while (0)
+
+// Only native dispatch is substituted; the production phase protocol and deadline
+// reducer run unchanged. Mutations between calls emulate native callbacks.
+struct PhaseNative {
+    spawn::Request request;
+    uint64_t now = 101;
+    bool context = true, owned = true, generation = true, initialized = true, final = false;
+    std::string phase = "Phase_1", afterPhase = "Phase_2";
+    std::string phaseOnFinalQuery;
+    bool afterFinal = true;
+    int failCall = 0, invalidateCall = 0, invalidateGuard = 0, invalidation = 0, guards = 0, setters = 0;
+    std::vector<std::string> calls;
+    PhaseNative() { CHECK(request.Begin(true, 1, 100) && request.Bind(0, {41})); }
+    void Invalidate() {
+        if (invalidation == 0) context = false;
+        if (invalidation == 1) owned = false;
+        if (invalidation == 2) generation = false;
+        if (invalidation == 3) now = 15100;
+    }
+    bool Valid() {
+        if (++guards == invalidateGuard) Invalidate();
+        if (!request.CheckDeadline(context, now)) return false;
+        if (!owned || !generation) { request.Observe(0, {41}, false, false, false); return false; }
+        return true;
+    }
+    bool Call(const char* name) {
+        calls.emplace_back(name);
+        if (int(calls.size()) == invalidateCall) Invalidate();
+        return int(calls.size()) != failCall;
+    }
+    bool Initialized(bool& out) { out = initialized; return Call("initialized"); }
+    bool Current(std::string& out) { out = phase; return Call("current"); }
+    bool Final(bool& out) {
+        if (!phaseOnFinalQuery.empty()) phase = phaseOnFinalQuery;
+        out = final; return Call("final");
+    }
+    bool SetFinal() {
+        ++setters;
+        phase = afterPhase; final = afterFinal;
+        return Call("set");
+    }
+};
+
+void PhaseTests()
+{
+    using State = spawn::PhaseState;
+    using Result = spawn::PhaseResult;
+    for (int type : {0, 1, 3, 4}) {
+        PhaseNative native;
+        State state{};
+        CHECK(spawn::PrepareCombatPhase(type, state, native) == Result::Ready);
+        CHECK(native.calls.empty() && native.guards == 0 && state == State::Fresh);
+    }
+    for (int type : {-1, 5, INT32_MAX}) {
+        PhaseNative native;
+        State state{};
+        CHECK(spawn::PrepareCombatPhase(type, state, native) == Result::Failed && native.calls.empty());
+    }
+    PhaseNative pending;
+    State state{};
+    pending.initialized = false;
+    CHECK(spawn::PrepareCombatPhase(2, state, pending) == Result::Pending);
+    CHECK(pending.calls == std::vector<std::string>{"initialized"} && pending.setters == 0);
+    pending.calls.clear(); pending.initialized = true;
+    CHECK(spawn::PrepareCombatPhase(2, state, pending) == Result::Ready);
+    CHECK(pending.calls == (std::vector<std::string>{"initialized", "final", "current", "set", "final", "current"}));
+    CHECK(pending.phase == "Phase_2" && pending.final && pending.setters == 1 && state == State::Verified);
+    CHECK(spawn::PrepareCombatPhase(2, state, pending) == Result::Ready && pending.setters == 1);
+    // A regression to the initial phase must never re-run the setter in this slot.
+    pending.phase = "Phase_1"; pending.final = false;
+    CHECK(spawn::PrepareCombatPhase(2, state, pending) == Result::Failed && pending.setters == 1);
+    auto calls = pending.calls;
+    CHECK(spawn::PrepareCombatPhase(2, state, pending) == Result::Failed && pending.calls == calls);
+    PhaseNative already;
+    state = State::Fresh; already.phase = "Phase_2"; already.final = true;
+    CHECK(spawn::PrepareCombatPhase(2, state, already) == Result::Ready && already.setters == 0);
+    CHECK(spawn::PrepareCombatPhase(2, state, already) == Result::Ready && already.setters == 0);
+    for (const char* phase : {"", "None", "Unknown", "CliffSequence", "CageSequence", "Phase_2"}) {
+        PhaseNative native;
+        state = State::Fresh; native.phase = phase;
+        CHECK(spawn::PrepareCombatPhase(2, state, native) == Result::Failed && native.setters == 0);
+    }
+    PhaseNative inconsistent;
+    state = State::Fresh; inconsistent.final = true;
+    CHECK(spawn::PrepareCombatPhase(2, state, inconsistent) == Result::Failed && inconsistent.setters == 0);
+    PhaseNative changedPhase;
+    state = State::Fresh; changedPhase.phaseOnFinalQuery = "CliffSequence";
+    CHECK(spawn::PrepareCombatPhase(2, state, changedPhase) == Result::Failed && changedPhase.setters == 0);
+    for (int failure = 1; failure <= 6; ++failure) {
+        PhaseNative native;
+        state = State::Fresh; native.failCall = failure;
+        CHECK(spawn::PrepareCombatPhase(2, state, native) == Result::Failed);
+        CHECK(int(native.calls.size()) == failure && state == State::Failed);
+        calls = native.calls;
+        CHECK(spawn::PrepareCombatPhase(2, state, native) == Result::Failed && native.calls == calls);
+    }
+    for (const char* phase : {"Phase_1", "CliffSequence", "CageSequence", "Unknown"}) {
+        PhaseNative native;
+        state = State::Fresh; native.afterPhase = phase;
+        CHECK(spawn::PrepareCombatPhase(2, state, native) == Result::Failed && native.setters == 1);
+    }
+    PhaseNative notFinal;
+    state = State::Fresh; notFinal.afterFinal = false;
+    CHECK(spawn::PrepareCombatPhase(2, state, notFinal) == Result::Failed && notFinal.setters == 1);
+    // Every call, especially the setter and postcondition getters, must be fenced
+    // on both sides. Invalidation wins even when native dispatch itself fails.
+    for (int why = 0; why < 4; ++why) {
+        for (int guard = 1; guard <= 12; ++guard) {
+            PhaseNative native;
+            state = State::Fresh; native.invalidation = why; native.invalidateGuard = guard;
+            CHECK(spawn::PrepareCombatPhase(2, state, native) == Result::Invalidated);
+            CHECK(int(native.calls.size()) == guard / 2);
+        }
+        for (int step = 1; step <= 6; ++step) {
+            PhaseNative native;
+            state = State::Fresh; native.invalidation = why; native.invalidateCall = step; native.failCall = step;
+            CHECK(spawn::PrepareCombatPhase(2, state, native) == Result::Invalidated);
+            CHECK(int(native.calls.size()) == step);
+            CHECK(native.request.Result() == (why == 0 ? spawn::Result::Transition : why == 3 ? spawn::Result::Timeout : spawn::Result::Stale));
+        }
+    }
+}
 int main()
 {
+    PhaseTests();
     // Actor existence must never count as completion; this is the production request reducer.
     spawn::Request request;
     CHECK(!request.Begin(false, 1, 100));

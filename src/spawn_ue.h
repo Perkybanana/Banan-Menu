@@ -5,6 +5,28 @@
 
 namespace spawn {
 using SpawnInfoValue = std::array<uint8_t, 336>;
+enum class PhaseFunction { Initialized, Current, Final, SetFinal };
+inline const char* PhaseFunctionName(PhaseFunction operation)
+{
+    switch (operation) {
+    case PhaseFunction::Initialized: return "AreCombatPhasesInitialized";
+    case PhaseFunction::Current: return "GetCurrentCombatPhaseName";
+    case PhaseFunction::Final: return "IsOnFinalCombatPhase";
+    case PhaseFunction::SetFinal: return "SetFinalCombatPhase";
+    }
+    return "";
+}
+inline bool PhaseSignature(const ue::UClass* cls, PhaseFunction operation)
+{
+    const char* name = PhaseFunctionName(operation);
+    if (!*name) return false;
+    const bool setter = operation == PhaseFunction::SetFinal;
+    const bool named = operation == PhaseFunction::Current;
+    const int size = setter ? 0 : named ? 8 : 1;
+    const bool exact = setter ? ue::Signature(cls, name, {}) :
+        ue::Signature(cls, name, {{"ReturnValue", named ? ue::Prop::Kind::Name : ue::Prop::Kind::Bool, size, nullptr, true}});
+    return exact && ue::StructSize(reinterpret_cast<ue::UClass*>(ue::FindFunction(cls, name, true))) == size;
+}
 
 // Prepare only a request's local copy, never the retained native defaults. A nonempty
 // authored subtype triggers the game's configured async ability initialization.

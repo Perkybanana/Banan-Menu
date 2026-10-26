@@ -107,6 +107,8 @@ struct SpawnPending {
     std::array<uint64_t, spawn::MaxCount> markers{};
     std::array<GenerationRef, spawn::MaxCount> targets{}; // optional positive serials only
     std::array<bool, spawn::MaxCount> seen{};
+    std::array<spawn::PhaseState, spawn::MaxCount> phases{};
+    const char* phaseFailure = nullptr;
     uint64_t pollAt = 0;
     int type = 0, count = 0;
 } g_spawnPending;
@@ -719,6 +721,80 @@ int HasSpawnMarker(UObject* enemy, uint64_t marker)
     return int(std::count(values.begin(), values.end(), marker));
 }
 
+bool CambionPhaseAPIs(int type)
+{
+    if (type != 2) return true; // keep the other four types independent of boss APIs
+    const UClass* cls = SelectedEnemyClass(type);
+    for (auto operation : {spawn::PhaseFunction::Initialized, spawn::PhaseFunction::Current,
+                          spawn::PhaseFunction::Final, spawn::PhaseFunction::SetFinal})
+        if (!spawn::PhaseSignature(cls, operation)) return false;
+    return true;
+}
+
+// Borrowed only during this poll. Across frames the request retains markers and
+// optional positive generations, never a serial-zero actor pointer.
+struct CambionPhaseNative {
+    SpawnPending& pending;
+    int slot;
+    const FreshWorldActor& actor;
+    bool requireModel = false;
+
+    bool Valid() {
+        auto deadline = [&] { return pending.request.CheckDeadline(!*pending.context.Why(), GetTickCount64()); };
+        if (!deadline()) return false;
+        UObject* target = actor.Get();
+        UObject* manager = SpawnManager(pending.context);
+        std::vector<UObject*> alive, dead;
+        bool owned = target && pending.markers[slot] && ClassOf(target) == SelectedEnemyClass(pending.type) &&
+            (!pending.targets[slot].obj || pending.targets[slot].Get() == target) &&
+            OwnedEnemies(manager, "AliveEnemies", alive) && OwnedEnemies(manager, "DeadEnemies", dead) &&
+            std::count(alive.begin(), alive.end(), target) == 1 && std::count(dead.begin(), dead.end(), target) == 0;
+        int markers = 0;
+        if (owned) {
+            for (const auto* list : {&alive, &dead}) for (auto* enemy : *list) if (enemy) {
+                const int count = HasSpawnMarker(enemy, pending.markers[slot]);
+                if (count < 0 || count > 1) owned = false; else markers += count;
+            }
+            owned = owned && markers == 1 && HasSpawnMarker(target, pending.markers[slot]) == 1 &&
+                actor.Get() == target && (!requireModel || EnemyModelReady(target));
+        }
+        if (!deadline()) return false; // transition/timeout win over ownership failure
+        if (!owned) {
+            pending.request.Observe(slot, {pending.markers[slot]}, false, false, false);
+            return false;
+        }
+        // Capture a serial assigned by any preceding native callback as soon as it exists.
+        if (!pending.targets[slot].obj) pending.targets[slot] = GenerationRef(target);
+        return true;
+    }
+    Call PhaseCall(spawn::PhaseFunction operation) {
+        UObject* target = actor.Get();
+        const UClass* cls = SelectedEnemyClass(pending.type);
+        return Call(target && ClassOf(target) == cls && spawn::PhaseSignature(cls, operation) ? target : nullptr,
+            spawn::PhaseFunctionName(operation), true);
+    }
+    bool Initialized(bool& value) {
+        auto call = PhaseCall(spawn::PhaseFunction::Initialized);
+        if (!SpawnerRun(call)) return false;
+        value = call.Out<bool>("ReturnValue"); return true;
+    }
+    bool Current(std::string& value) {
+        auto call = PhaseCall(spawn::PhaseFunction::Current);
+        if (!SpawnerRun(call)) return false;
+        const auto name = call.Out<uint64_t>("ReturnValue");
+        value = NameToString(&name); return true;
+    }
+    bool Final(bool& value) {
+        auto call = PhaseCall(spawn::PhaseFunction::Final);
+        if (!SpawnerRun(call)) return false;
+        value = call.Out<bool>("ReturnValue"); return true;
+    }
+    bool SetFinal() {
+        auto call = PhaseCall(spawn::PhaseFunction::SetFinal);
+        return SpawnerRun(call);
+    }
+};
+
 const char* SpawnResultMessage(spawn::Result result)
 {
     switch (result) {
@@ -787,6 +863,8 @@ void TickSpawner(uint64_t now)
             }
             pending.seen[i] = true;
             if (!pending.targets[i].obj) pending.targets[i] = GenerationRef(match); // stays empty for serial-zero actors
+            CambionPhaseNative phases{pending, i, actor};
+            if (pending.type == 2 && !phases.Valid()) return;
             if (!withinDeadline()) return; // do not invoke another completion getter after expiry
             const bool initialized = EnemyInitialized(actor.Get());
             if (!withinDeadline()) return; // the getter may have crossed the deadline
@@ -810,7 +888,21 @@ void TickSpawner(uint64_t now)
             }
             const bool model = owned && EnemyModelReady(actor.Get());
             if (!withinDeadline()) return; // fresh time after scans/model work, before accepting this observation
-            pending.request.Observe(i, {pending.markers[i]}, owned, initialized, model);
+            bool phaseReady = true;
+            if (owned && initialized && model) {
+                // This slot is not ready until this poll's phase verification succeeds,
+                // including when a later native getter faults or changes ownership.
+                if (pending.type == 2) pending.request.Observe(i, {pending.markers[i]}, true, false, model);
+                phases.requireModel = true;
+                pending.phaseFailure = "Cambion combat phase preparation failed.";
+                const auto result = spawn::PrepareCombatPhase(pending.type, pending.phases[i], phases);
+                if (result == spawn::PhaseResult::Invalidated) return; // guard already selected transition/timeout/stale
+                if (result == spawn::PhaseResult::Failed) { pending.request.Fail(); return; }
+                pending.phaseFailure = nullptr;
+                phaseReady = result == spawn::PhaseResult::Ready;
+            }
+            if (!withinDeadline()) return;
+            pending.request.Observe(i, {pending.markers[i]}, owned, initialized && phaseReady, model);
         }
         const bool context = !*pending.context.Why();
         pending.request.Poll(context, GetTickCount64());
@@ -818,6 +910,17 @@ void TickSpawner(uint64_t now)
     if (!Guard(poll)) pending.request.Fail();
     s.enemySpawnerCreated = pending.request.Ready();
     s.enemySpawnerMessage = SpawnResultMessage(pending.request.Result());
+    if (pending.type == 2) {
+        switch (pending.request.Result()) {
+        case spawn::Result::Pending: s.enemySpawnerMessage = "Waiting for Cambion initialization, model and combat phase..."; break;
+        case spawn::Result::Timeout: s.enemySpawnerMessage = "Spawn timed out: Cambion initialization, model or combat phase is not ready."; break;
+        case spawn::Result::Success: s.enemySpawnerMessage = "Cambions initialized with models and final combat phase."; break;
+        case spawn::Result::Dispatch:
+            if (pending.phaseFailure) s.enemySpawnerMessage = pending.phaseFailure;
+            break;
+        default: break;
+        }
+    }
     if (!pending.request.Pending()) FinishSpawn(s.enemySpawnerMessage);
 }
 
@@ -2197,6 +2300,7 @@ void SpawnEnemies(int type, int count)
             if (!SpawnInfoLayout()) { failure = "Native enemy spawner API unavailable."; return; }
             if (!SpawnClass(type)) { failure = "Enemy class load failed."; return; }
             if (*context.Why()) { failure = "Level changed; spawning stopped."; return; }
+            if (!CambionPhaseAPIs(type)) { failure = "Cambion combat phase API unavailable; nothing spawned."; return; }
             if (!EnemyConfiguration(type)) { failure = "Selected enemy Blueprint has no usable EnemySettings configuration."; return; }
             UObject* manager = SpawnManager(context);
             std::vector<UObject*> initial;

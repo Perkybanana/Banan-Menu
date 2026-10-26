@@ -8,7 +8,7 @@ namespace {
 alignas(16) std::array<std::array<uint8_t, 0x160>, 16> objects{};
 std::array<uint8_t, 24 * 16> items{};
 std::array<uint8_t*, 1> chunks{items.data()};
-std::array<uint8_t, 4096> names{};
+std::array<uint8_t, 8192> names{};
 std::array<uint8_t*, 8192> blocks{};
 int32_t count = 16;
 uint32_t cursor = 2;
@@ -16,6 +16,7 @@ template<class T> void Put(void* p, size_t offset, T value) { memcpy(static_cast
 uint32_t NameId(const char* name) {
     auto id = cursor / 2;
     auto size = strlen(name);
+    if (cursor + size + 4 > names.size()) { fprintf(stderr, "FAIL: fixture name pool exhausted\n"); exit(1); }
     Put(names.data(), cursor, uint16_t(size << 6));
     memcpy(names.data() + cursor + 2, name, size);
     cursor += uint32_t((size + 3) & ~size_t(1));
@@ -317,6 +318,50 @@ int main() {
         "ordinary enum still resolves UEnum at 0x78 rather than underlying property at 0x70");
     Put(signatureFunction, 0x50, static_cast<ue::UObject*>(nullptr)); Put(signatureFunction, 0x58, int32_t(0));
     Check(ue::Signature(expectedEnemy, "SpawnTest", {}), "exact no-argument cleanup signature accepted");
+    // Actual fixed phase API preflight/dispatch helper: signatures are resolved
+    // freshly, including exact total buffer size and scalar return direction.
+    for (auto operation : {spawn::PhaseFunction::Initialized, spawn::PhaseFunction::Current,
+                          spawn::PhaseFunction::Final, spawn::PhaseFunction::SetFinal}) {
+        const bool setter = operation == spawn::PhaseFunction::SetFinal;
+        const bool named = operation == spawn::PhaseFunction::Current;
+        const int size = setter ? 0 : named ? 8 : 1;
+        Put(signatureFunction, 0x18, NameId(spawn::PhaseFunctionName(operation)));
+        Put(signatureFunction, 0x58, int32_t(size));
+        Put(signatureFunction, 0x50, setter ? nullptr : parameter);
+        Put(parameter, 0x18, static_cast<void*>(nullptr));
+        Put(parameter, 8, parameterType);
+        Put(parameterType, 0, NameId(named ? "NameProperty" : "BoolProperty"));
+        Put(parameter, 0x20, NameId("ReturnValue"));
+        Put(parameter, 0x30, int32_t(1)); Put(parameter, 0x34, int32_t(size));
+        Put(parameter, 0x38, uint64_t(0x480)); Put(parameter, 0x44, int32_t(0));
+        Put(parameter, 0x70, uint32_t(0x00010001)); // native scalar bool: zero byte offset, one-bit mask
+        Check(spawn::PhaseSignature(expectedEnemy, operation), "exact fixed native phase API accepted");
+        Put(signatureFunction, 0x58, int32_t(size + 1));
+        Check(!spawn::PhaseSignature(expectedEnemy, operation), "phase total parameter buffer mismatch rejected");
+        Put(signatureFunction, 0x58, int32_t(size));
+        Put(signatureFunction, 0x50, parameter);
+        if (setter) {
+            Put(parameter, 0x34, int32_t(1)); Put(signatureFunction, 0x58, int32_t(1));
+            Check(!spawn::PhaseSignature(expectedEnemy, operation), "phase setter with unexpected parameter rejected");
+        } else {
+            Put(parameter, 0x30, int32_t(2));
+            Check(!spawn::PhaseSignature(expectedEnemy, operation), "phase return array rejected");
+            Put(parameter, 0x30, int32_t(1)); Put(parameter, 0x38, uint64_t(0x80));
+            Check(!spawn::PhaseSignature(expectedEnemy, operation), "phase input instead of return rejected");
+            Put(parameter, 0x38, uint64_t(0x480)); Put(parameterType, 0, NameId("IntProperty"));
+            Check(!spawn::PhaseSignature(expectedEnemy, operation), "phase wrong return kind rejected");
+            Put(parameterType, 0, NameId(named ? "NameProperty" : "BoolProperty"));
+            Put(parameter, 0x34, int32_t(size + 1));
+            Check(!spawn::PhaseSignature(expectedEnemy, operation), "phase wrong return size rejected");
+            Put(parameter, 0x34, int32_t(size)); Put(parameter, 0x44, int32_t(1));
+            Check(!spawn::PhaseSignature(expectedEnemy, operation), "phase return beyond buffer rejected");
+            Put(parameter, 0x44, int32_t(0)); Put(parameter, 0x20, NameId("WrongReturn"));
+            Check(!spawn::PhaseSignature(expectedEnemy, operation), "phase wrong return name rejected");
+        }
+        Put(signatureFunction, 0x18, NameId("WrongFunction"));
+        Check(!spawn::PhaseSignature(expectedEnemy, operation), "phase missing function rejected despite prior success");
+        Check(!spawn::PhaseSignature(nullptr, operation), "phase missing class rejected");
+    }
     // Synthetic reflection layout, independent of the production decoder constants.
     // The value offsets deliberately differ from the game's layout.
     std::array<uint8_t, 0x160> seedStruct{}, hearingField{}, hearingType{}, curveClass{};

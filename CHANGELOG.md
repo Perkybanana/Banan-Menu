@@ -1,5 +1,10 @@
 # Changes
 
+## 1.0.0-dev.9 — development candidate, 2026-10-26
+
+- Newly spawned, uniquely request-owned Cambions now wait for native combat-phase initialization and prepare authored final Phase_2 once while still in Phase_1. This avoids the encounter-dependent Cliff/Cage phase stall observed in dev.8. Already-final actors are verified without another setter; unexpected phases fail closed. Existing stuck or story actors are outside this correction.
+- Added production protocol and exact reflected-signature regressions, including callback invalidation, deadline precedence and no phase calls for the other four types. Native effects, including starting instant-kill immunity, remain intact. Killability, normal stagger/Banish/finisher behavior and Kill nearby still need native acceptance. The authored final-phase callback uses the player's shared boss HUD; concurrent-boss display behavior is untested.
+
 ## 1.0.0-dev.8 — development candidate, 2026-10-26
 
 - Populate each request's reflected EnemySubtype.TagName with its fixed authored configuration key before native dispatch. An empty subtype skipped the native controller setter and configured ability preloading/granting, even when the controller's default type already matched. The shared native seed and other spawn defaults remain unchanged.

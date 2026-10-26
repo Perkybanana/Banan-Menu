@@ -2,10 +2,50 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <string>
 
 namespace spawn {
 inline constexpr int TypeCount = 5, MaxCount = 5;
 inline constexpr uint64_t TimeoutMs = 15000;
+enum class PhaseState { Fresh, Attempted, Verified, Failed };
+enum class PhaseResult { Pending, Ready, Failed, Invalidated };
+// Used only by pending, freshly correlated spawn slots. Native::Valid rechecks
+// current context/deadline/identity/unique alive ownership around every dispatch.
+template<class Native> PhaseResult PrepareCombatPhase(int type, PhaseState& state, Native& native)
+{
+    if (type < 0 || type >= TypeCount) return PhaseResult::Failed;
+    if (type != 2) return PhaseResult::Ready;
+    if (state == PhaseState::Failed) return PhaseResult::Failed;
+    auto fail = [&] { state = PhaseState::Failed; return PhaseResult::Failed; };
+    auto invoke = [&](auto&& call) {
+        if (!native.Valid()) return PhaseResult::Invalidated;
+        const bool dispatched = call();
+        if (!native.Valid()) return PhaseResult::Invalidated;
+        return dispatched ? PhaseResult::Ready : fail();
+    };
+    bool initialized = false, final = false;
+    std::string phase;
+    auto result = invoke([&] { return native.Initialized(initialized); });
+    if (result != PhaseResult::Ready) return result;
+    if (!initialized) return PhaseResult::Pending;
+    result = invoke([&] { return native.Final(final); });
+    if (result != PhaseResult::Ready) return result;
+    // Read the phase last, immediately before the guarded mutation decision.
+    result = invoke([&] { return native.Current(phase); });
+    if (result != PhaseResult::Ready) return result;
+    if (phase == "Phase_2" && final) { state = PhaseState::Verified; return PhaseResult::Ready; }
+    if (phase != "Phase_1" || final || state != PhaseState::Fresh) return fail();
+    state = PhaseState::Attempted; // never repeat a setter, even if its dispatch/postcondition fails
+    result = invoke([&] { return native.SetFinal(); });
+    if (result != PhaseResult::Ready) return result;
+    result = invoke([&] { return native.Final(final); });
+    if (result != PhaseResult::Ready) return result;
+    result = invoke([&] { return native.Current(phase); });
+    if (result != PhaseResult::Ready) return result;
+    if (phase != "Phase_2" || !final) return fail();
+    state = PhaseState::Verified;
+    return PhaseResult::Ready;
+}
 // Engine-created FName request marker, not a UObject pointer/index/serial.
 struct Identity { uint64_t token = 0; bool operator==(const Identity&) const = default; };
 enum class Result { Idle, Pending, Success, Preflight, Timeout, Transition, Stale, Dispatch };
