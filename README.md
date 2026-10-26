@@ -53,8 +53,6 @@ Real, unmodified game captures. The menu shown is the accepted development build
 
 ![Banan Menu dev.9 Player tab at the main menu; no active player](https://raw.githubusercontent.com/Perkybanana/Banan-Menu/development/assets/screenshots/banan-menu-dev9.jpg)
 
-![Banan Menu dev.9 Player tab at the main menu; no active player](https://raw.githubusercontent.com/Perkybanana/Banan-Menu/development/assets/screenshots/banan-menu-dev9.jpg)
-
 ## FAQ
 
 **The menu does not open.** Check DLL placement beside the game executable, then try both Insert and F8. A game update or another proxy DLL can affect compatibility. Include your game build and mod version when [reporting a problem](https://github.com/Perkybanana/Banan-Menu/issues).

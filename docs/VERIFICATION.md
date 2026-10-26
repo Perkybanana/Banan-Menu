@@ -1,6 +1,6 @@
 # Verification scope
 
-Source version **1.0.0**, prepared on 2026-10-26, preserves the gameplay implementation reviewed and accepted in **1.0.0-dev.9**, source commit `3619796053f5194b12dbf0885648e8ac9311687d`. The stable source changes concern version metadata, packaging, CI and documentation. They do not establish a new installation or scan result. Final archive freeze, stable DLL scan/checksum, publication and installation are separate release gates.
+Source version **1.0.0**, prepared on 2026-10-26, preserves the gameplay implementation reviewed and accepted in **1.0.0-dev.9**, source commit `3619796053f5194b12dbf0885648e8ac9311687d`. The stable source changes concern version metadata, packaging, CI and documentation. They do not establish additional gameplay acceptance or a new installation. The exact stable DLL scan and build evidence are recorded below. Final whole-branch review, archive/manifest freeze, publication and installation remain separate pending gates.
 
 The tested installation is the **Windows x64 Steam game, build 1.1.1.227384, DX12**. The genuine dev.9 interface capture confirms that build and renderer; it is taken at the main menu without an active player. DX11 support exists in the overlay source and host test utility, but this game acceptance record is DX12.
 
@@ -25,6 +25,8 @@ Dev.3's native helper panel opened with an empty type list and did not spawn. De
 
 ## Offline checks and package contract
 
+The normal serial Release build at source `4ca5bc1` passed, with `KM_DUMPER=OFF`; the complete CTest run passed **10/10**, with zero failures. Gameplay source remains unchanged from accepted dev.9.
+
 The CMake/CTest suite covers resource bounds, preset persistence/validation, proxy exports, achievement helpers, reflection-cache handling, camera bookmark/generation guards, spawn placement/bounds, completion/timeouts/correlation, typed signatures, actor ownership, authored subtypes and Cambion phase protocol. The package version test executes the production parser with stable/development versions and invalid/ambiguous declarations. Offline tests do not execute Unreal combat or replace gameplay acceptance. They require no game installation or saves. The fake Steam DLL and overlay host are test utilities and never enter release packages.
 
 All game mutations remain on the game thread; the render thread consumes copied snapshots. Packaging requires committed source/package inputs, a normal Release DLL containing the exact declared stable/development version, the matching configured source directory, and `KM_DUMPER=OFF`. It rejects unsafe output paths and unintended overwrites. The ZIP contains exactly these eight entries:
@@ -42,12 +44,14 @@ The packager checks every archived entry's size and SHA-256 against its input. T
 
 ## Scan evidence
 
-Historical scans remain associated with their exact candidates; they are not relabeled stable scans:
+Current and historical scans remain associated with their exact DLLs; old candidate scans are not relabeled stable scans:
 
 | Candidate | Exact DLL SHA-256 | Recorded result |
 | --- | --- | --- |
 | Historical 2026-10-24 candidate | `ea63783deb724251c1505faa657a0fcd0a214468d2e8458150cd4212cf750d8f` | Microsoft Defender exit 0, no threats reported on 2026-10-24. |
 | 1.0.0-dev.9 / source `3619796` | `54e178dfaa24b48482ddee111ab3a7975fa0b2574df47beace4fb70902f4d5ff` | Exact packaged DLL scanned with Microsoft Defender on 2026-10-26: exit 0, no threats reported; installed DLL matched that hash. |
-| 1.0.0 stable | Not recorded at source preparation | Root must scan the final Release DLL, freeze/verify the archive and record exact hashes before publication/installation. |
+| 1.0.0 stable / source `4ca5bc1` | `71a8c926c346721838f35307f6ed3929accf8886ef04de16cbf91b4344489623` | Exact extracted stable DLL scanned with Microsoft Defender on 2026-10-26: exit 0, no threats reported. Serial Release and all 10 CTests passed. |
 
 A different hash or future CI build needs its own evidence. A scoped scan cannot guarantee absence of all malicious code, and neither scanning nor offline tests establish additional in-game acceptance.
+
+A targeted source/history privacy scan at `4ca5bc1` covered 26 commits and 199 blobs and found no known-format private-path or secret matches. This is bounded scan evidence, not exhaustive proof that every possible sensitive format is absent. Final documentation and manifest must be repackaged from the final reviewed commit; unchanged DLL bytes retain only their exact recorded hash evidence. Final whole-branch review, publication and installation are pending.
