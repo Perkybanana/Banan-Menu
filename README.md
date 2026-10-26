@@ -1,48 +1,93 @@
-# Banan Menu for Hellraiser: Revival
+<p align="center"><img src="https://raw.githubusercontent.com/Perkybanana/Banan-Menu/development/assets/banan-hero.svg" alt="Banan Menu — Hellraiser: Revival. Insert / F8." width="100%"></p>
+<h1 align="center">Banan Menu</h1>
+<p align="center">An in-game menu for <b>Clive Barker’s Hellraiser: Revival</b> on Windows.<br>Player controls, inventory tools, photo tools, chapter selection and enemy spawning.</p>
+<p align="center"><b>English</b> · <a href="README.ru.md">Русский</a></p>
+<p align="center">
+<a href="https://github.com/Perkybanana/Banan-Menu/releases/latest"><img src="https://img.shields.io/github/v/release/Perkybanana/Banan-Menu?label=latest%20stable&amp;color=ac6ee2" alt="Latest published stable release"></a>
+<a href="https://github.com/Perkybanana/Banan-Menu/actions/workflows/build.yml"><img src="https://github.com/Perkybanana/Banan-Menu/actions/workflows/build.yml/badge.svg?branch=development" alt="Windows build workflow"></a>
+<a href="docs/VERIFICATION.md"><img src="https://img.shields.io/badge/tested%20game-1.1.1.227384-262631" alt="Tested Steam game build 1.1.1.227384"></a>
+<img src="https://img.shields.io/badge/platform-Windows%20x64-262631" alt="Windows x64">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-ac6ee2" alt="MIT license"></a>
+</p>
+<p align="center"><a href="#installation">Installation</a> · <a href="#features">Features</a> · <a href="#usage">Usage</a> · <a href="#screenshots">Screenshots</a> · <a href="#faq">FAQ</a> · <a href="#uninstall">Uninstall</a> · <a href="#build">Build</a></p>
 
-**1.0.0-dev.7 is a development candidate for the Windows Steam game, not a verified stable 1.0.0 release.** Dev.3's panel was nonfunctional. Dev.4 produced invisible/inert enemies, and a Genesis execution after Kill nearby crashed with a missing model. Dev.5 introduced full enemy-manager initialization and completion/model checks. Dev.6 corrected array metadata decoding but still failed native-default validation before spawn dispatch. Dev.7 explicitly selects no optional hearing-curve override in the owned seed after typed reflection checks, and records the rejected field/stage on validation failure. Gameplay acceptance remains pending. Native episode/chapter selection is supported; arbitrary checkpoint starts are outside the current scope.
+**Press Insert or F8 to open the menu.** Source version: **1.0.0**. [Downloads and release notes](https://github.com/Perkybanana/Banan-Menu/releases) identify the builds actually published; the badge tracks the latest published stable release.
 
-[Русская версия](README.ru.md) · [Changes](CHANGELOG.md) · [Verification scope](docs/VERIFICATION.md)
-
-## Features in this source
-
-- Player and combat controls: health, damage, ammunition, durability, aim and Genesis Configuration powers.
-- Movement and world controls: fly/noclip, speed/jump, saved positions, teleport to live level checkpoints, time scale, AI controls, free camera, FOV and HUD visibility.
-- ESP for enemies, items, containers and save points.
-- Inventory: money, six carried crafting-material totals (0..9999), item browser, favorites and explicit item kits; settings profiles with local persistence.
-- Progress controls for current objectives, shop level and Steam achievements; native chapter selection remains available. Language, scaling and hotkeys are configurable.
-- Three guarded, session-only camera bookmarks. On 2026-10-25 the user accepted dev.2 Save, move/rotate and Restore on Chapter5, and separately accepted wrong-map Restore blocking after a menu/chapter transition without a crash. Other slots, FOV and death variants have not all been tested.
-- World → Enemy spawner offers Hellghoul, Exploding Hellghoul, Cambion, Cultist and Runner, with an explicit count of 1–5. The menu stays open. Only the selected class loads on click; the first load may pause briefly. Native manager requests place enemies in front of the pawn with spacing. Status stays pending for up to 15 seconds and counts only the correlated enemies with completed native initialization and a usable model. Missing settings, incomplete models and changed levels report failure/partial readiness. Kill nearby skips enemies whose initialization/model is not ready. These checks do not establish AI, combat or finisher acceptance.
-
-Available controls depend on the current player/map and supported native game interfaces. Kits request item delivery and may encounter the existing native capacity/drop behavior; they are not atomic equip/loadouts. Teleporting to a live checkpoint does not start a complete story state. Recoil, attack speed and hand visibility were removed from the current work scope by owner decision. Unusual weapons and possible cut content remain research; their functionality is not confirmed.
-
-## Install, update and remove
+## Installation
 
 1. Close the game. In Steam, browse the game's installed files and open `Hellraiser/Binaries/Win64`.
-2. Back up any existing mod `winmm.dll`. From the development archive, copy **only `winmm.dll`** into that directory, beside the game executable. Keep the archive's documentation and licenses for reference.
-3. Start the game normally through Steam. Press **Insert** or **F8** to toggle the menu.
+2. Back up any existing mod `winmm.dll`. Download a build from [Releases](https://github.com/Perkybanana/Banan-Menu/releases) and copy **only `winmm.dll`** beside the game executable. Keep the archive's documentation and licenses.
+3. Start the game normally through Steam and press **Insert** or **F8**.
 
-For updates, close the game, back up the existing DLL, then replace only `winmm.dll`. Preserve `BananMenu.ini` (settings) and `BananMenu.presets` (profiles, favorites and kits). The archive includes neither file. Reopen the native inventory after changing crafting totals to refresh its display.
+**Updating:** close the game, back up the old DLL and replace only `winmm.dll`. Keep `BananMenu.ini` and `BananMenu.presets` to preserve settings, profiles, favorites and item kits. Neither file is included in the download. To roll back, restore your backed-up DLL while the game is closed.
 
-To uninstall, close the game and remove the mod's `winmm.dll`, or restore the DLL you backed up. Settings and presets may be kept for a later reinstall; removing them is optional. To roll back an update, restore your backed-up mod DLL while the game is closed.
+## Features
 
-## Build and package
+| Area | Controls |
+| --- | --- |
+| Player & combat | Health, damage, ammunition, durability, aim and Genesis Configuration powers. |
+| Inventory | Money, six carried crafting-material totals (0–9999), item browser, favorites and explicit item kits. |
+| Movement & world | Fly/noclip, speed/jump, saved positions, live-checkpoint teleport, time scale and AI controls. |
+| Photo tools | Free camera, FOV, HUD visibility and three map-associated camera bookmarks. |
+| World spawning | Hellghoul, Exploding Hellghoul, Cambion, Cultist and Runner; explicit batches of 1–5 through native enemy initialization. |
+| ESP | Enemies, items, containers and save points. |
+| Progress & settings | Native chapter selection, current objectives, shop level, Steam achievements, local profiles, language, scaling and hotkeys. |
 
-Requires Windows x64, an MSVC C++/MASM toolchain and CMake 3.25 or newer. No credentials, user saves or game installation are required to build or run the offline tests. CMake downloads pinned, hash-checked Dear ImGui and MinHook archives during initial configuration; no new dependencies are required. The menu makes no web requests at game runtime.
+Controls depend on the current map and player. Camera bookmarks last for the current game session; Restore is blocked on a different map. Item kits use native capacity/drop behavior. Live-checkpoint teleport moves to a loaded checkpoint; it does not prepare story state. Cambion spawning uses the final combat phase, rather than recreating the scripted boss encounter. Count 5, concurrent boss HUDs and every map/encounter have not been exhaustively tested. See the [recorded acceptance scope](docs/VERIFICATION.md).
+
+## Usage
+
+- Open a category and explicitly apply the action you want. Nothing spawns automatically.
+- Reopen the native inventory after setting crafting totals to refresh its displayed counts.
+- Save a camera view, move/rotate the camera, then use Restore on the same map. These bookmarks do not survive a restart.
+- In World, choose an enemy type and count, then Spawn. First loading a class may pause briefly. Readiness is asynchronous and can take up to 15 seconds; the status reports completed initialization and model readiness. Kill nearby skips incomplete targets.
+- Save settings profiles and item kits locally. Loading a profile changes its switches/values; one-shot actions still require an explicit click.
+
+## Screenshots
+
+Real, unmodified game captures. The menu shown is the accepted development build; these images do not claim a new 1.0.0 installation or additional runtime coverage.
+
+![Hellraiser: Revival main menu](https://raw.githubusercontent.com/Perkybanana/Banan-Menu/development/assets/screenshots/main-menu.jpg)
+
+![Native chapter selection](https://raw.githubusercontent.com/Perkybanana/Banan-Menu/development/assets/screenshots/episode-selection.jpg)
+
+![Banan Menu dev.9 Player tab at the main menu; no active player](https://raw.githubusercontent.com/Perkybanana/Banan-Menu/development/assets/screenshots/banan-menu-dev9.jpg)
+
+![Banan Menu dev.9 Player tab at the main menu; no active player](https://raw.githubusercontent.com/Perkybanana/Banan-Menu/development/assets/screenshots/banan-menu-dev9.jpg)
+
+## FAQ
+
+**The menu does not open.** Check DLL placement beside the game executable, then try both Insert and F8. A game update or another proxy DLL can affect compatibility. Include your game build and mod version when [reporting a problem](https://github.com/Perkybanana/Banan-Menu/issues).
+
+**Can I start at any checkpoint?** Native chapter selection is retained. Arbitrary checkpoint starts were canceled; live-checkpoint teleport is a separate tool.
+
+**Are there restored cut weapons or extra powers?** None are claimed. The [bounded content investigation](https://github.com/Perkybanana/Banan-Menu/blob/development/docs/CONTENT-RESEARCH.md) found no demonstrated ready-to-enable additional player weapon or power.
+
+**Where are settings stored?** `BananMenu.ini` and `BananMenu.presets` are local files beside the game executable. Keep them when updating.
+
+**Is a download verified?** Compare its DLL SHA-256 with its release manifest. Scan evidence applies only to the exact hash recorded in release notes or [verification](docs/VERIFICATION.md); a rebuilt DLL needs its own scan. Offline checks do not replace in-game testing.
+
+## Uninstall
+
+Close the game and remove the mod's `winmm.dll`, or restore the DLL you backed up. You may keep the settings and presets for a later reinstall, or remove them separately.
+
+## Build
+
+Windows x64, MSVC C++/MASM and CMake 3.25+ are required. Initial configuration downloads pinned, hash-checked Dear ImGui and MinHook sources. No game installation, saves or credentials are needed for the offline tests. The menu makes no web requests at game runtime.
 
 ```powershell
-cmake -S . -B build -A x64
+cmake -S . -B build -A x64 -DKM_DUMPER=OFF
 cmake --build build --config Release --parallel 1 -- /nodeReuse:false
 ctest --test-dir build -C Release --output-on-failure
 powershell -NoProfile -File scripts/package.ps1 -BuildDirectory build -OutputDirectory packages
 ```
 
-The packager accepts only the normal Release DLL and the documentation/license allowlist. It produces `BananMenu-1.0.0-dev.7-win64.zip` and a JSON hash/size manifest with the source commit and candidate version. Existing targets cause a failure unless `-Force` is explicitly supplied. Compare the extracted DLL's SHA-256 with the manifest before installation. Consult the release notes for the candidate you install and the [recorded scan evidence](docs/VERIFICATION.md). A scan result applies only to its exact recorded DLL hash; a different build needs its own evidence. Scanning does not guarantee absence of all malicious code or establish in-game acceptance.
+Commit source and package inputs before packaging. The packager accepts stable `1.0.0` or development `1.0.0-dev.N`, the normal Release DLL with dumper disabled, and an exact eight-file documentation/license allowlist. It verifies every archived entry against its input and writes `BananMenu-1.0.0-win64.zip` plus a JSON manifest containing version, source commit, entry sizes/hashes and archive hash. Existing outputs require explicit `-Force`. The eight-entry package excludes settings, presets, tests and screenshots; view images in the [online README](https://github.com/Perkybanana/Banan-Menu#screenshots).
 
-The Windows workflow builds, tests and uploads a development artifact; it does not publish a GitHub Release. For contributions, keep game mutations on the game thread, render from copied snapshots, and add user-facing RU/EN text to `src/lang.cpp`. Run the build and tests above and describe the actual runtime verification performed.
+The [Windows workflow](https://github.com/Perkybanana/Banan-Menu/actions/workflows/build.yml) builds, tests and uploads artifacts; it does not publish releases. Contributions must keep mutations on the game thread, render from copied snapshots and place user-facing RU/EN strings in `src/lang.cpp`.
 
-## Source and licenses
+## Credits & licenses
 
-Based on [Ketamine Menu](https://github.com/literalynn/Hellraiser-Revivals-Ketamine-Menu), commit `3b4ba3efc7ecc8c01f2d59b67ff64e4c3fda642f`. Upstream copyright and [MIT license](LICENSE) are preserved. See [dependency notices](THIRD-PARTY-NOTICES.txt) and the [Inter font license](assets/fonts/Inter-OFL.txt). These notices are included in the binary archive.
+Based on [Ketamine Menu](https://github.com/literalynn/Hellraiser-Revivals-Ketamine-Menu), upstream commit `3b4ba3efc7ecc8c01f2d59b67ff64e4c3fda642f`. Upstream copyright and the [MIT license](LICENSE) are preserved. See [third-party notices](THIRD-PARTY-NOTICES.txt) and the [Inter font license](assets/fonts/Inter-OFL.txt), all included in the binary archive.
 
-Game binaries/assets, saves, logs, dumps, personal paths and credentials are not distribution inputs.
+[Changelog](CHANGELOG.md) · [Verification](docs/VERIFICATION.md) · [Issues](https://github.com/Perkybanana/Banan-Menu/issues)

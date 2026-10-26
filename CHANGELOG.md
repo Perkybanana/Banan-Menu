@@ -1,5 +1,16 @@
 # Changes
 
+## 1.0.0 — stable source preparation, 2026-10-26
+
+- Prepare normal source/version metadata as 1.0.0 while preserving the accepted dev.9 gameplay implementation. Final scan, archive verification, publication and installation remain separate release gates.
+- Support stable 1.0.0 and development 1.0.0-dev.N packaging with production version-parser regressions. Retain Release/dumper-off/source-commit checks, the exact eight-entry allowlist and per-entry/archive hashes; settings and presets remain excluded.
+- Add original Banan vector branding, genuine dev.9 game screenshots, matching EN/RU documentation, live release/build badges and a concise content-research result. Rename the build workflow for stable/development source; it still only uploads artifacts.
+- Record later user acceptance of ordinary/exploding Hellghoul behavior and dev.9 fresh-Cambion normal depletion/Genesis plus separate Kill nearby/finisher checks. Count 5, simultaneous boss HUD and all maps/combat contexts remain bounded limitations. Camera/resources/profiles/chapter-selection acceptance is preserved.
+- Close named residual weapon/power research with no demonstrated ready-to-enable cut weapon or additional Genesis power; no speculative controls were added. Arbitrary checkpoint starts remain canceled.
+
+Historical candidate entries below retain the acceptance status known at their dates; see [current verification](docs/VERIFICATION.md) for later outcomes.
+
+
 ## 1.0.0-dev.9 — development candidate, 2026-10-26
 
 - Newly spawned, uniquely request-owned Cambions now wait for native combat-phase initialization and prepare authored final Phase_2 once while still in Phase_1. This avoids the encounter-dependent Cliff/Cage phase stall observed in dev.8. Already-final actors are verified without another setter; unexpected phases fail closed. Existing stuck or story actors are outside this correction.

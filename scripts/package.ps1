@@ -1,4 +1,4 @@
-# Packages only the development runtime and public documentation. Never installs or launches the game.
+# Packages only the stable/development runtime and public documentation. Never installs or launches the game.
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$BuildDirectory,
@@ -10,6 +10,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+. (Join-Path $PSScriptRoot 'package-version.ps1')
 
 function Get-SafePath([string]$Value) {
     if ([string]::IsNullOrWhiteSpace($Value) -or $Value -match '[*?\[\]]' -or $Value.StartsWith('\\')) {
@@ -53,10 +54,7 @@ foreach ($protected in @($source, $build)) {
 if ($output -eq [IO.Path]::GetPathRoot($output).TrimEnd('\')) { throw 'Output must not be a drive root.' }
 
 $cmake = Get-Content -LiteralPath (Join-Path $source 'CMakeLists.txt') -Raw
-if ($cmake -notmatch 'set\(BANAN_VERSION "(1\.0\.0-dev\.[1-9][0-9]*)"\)') {
-    throw 'Unrecognized development candidate version in CMakeLists.txt.'
-}
-$version = $Matches[1]
+$version = Get-PackageVersion $cmake
 $cache = Get-Content -LiteralPath (Join-Path $build 'CMakeCache.txt') -Raw
 if ($cache -notmatch '(?m)^CMAKE_HOME_DIRECTORY:INTERNAL=(.+)\r?$') { throw 'Not a configured build.' }
 if ((Get-SafePath $Matches[1].Trim()) -ne $source) { throw 'Build belongs to a different source directory.' }
@@ -79,11 +77,11 @@ foreach ($name in $inputs.Keys) {
     $records += Get-FileRecord $path $name
 }
 $dllText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($inputs['winmm.dll']))
-if (-not $dllText.Contains($version + [char]0)) { throw 'Release DLL does not contain the candidate version; rebuild it first.' }
+if (-not $dllText.Contains($version + [char]0)) { throw 'Release DLL does not contain the package version; rebuild it first.' }
 $commit = & git -C $source rev-parse --verify HEAD
 if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') { throw 'Cannot identify the source commit.' }
 # Refuse to label uncommitted distribution/build inputs with an earlier source commit.
-$changes = & git -C $source status --porcelain --untracked-files=normal -- CMakeLists.txt src scripts/package.ps1 README.md README.ru.md CHANGELOG.md LICENSE THIRD-PARTY-NOTICES.txt assets/fonts docs/VERIFICATION.md
+$changes = & git -C $source status --porcelain --untracked-files=normal
 if ($LASTEXITCODE -ne 0 -or $changes) { throw 'Commit the source and package inputs before packaging.' }
 
 $stem = "BananMenu-$version-win64"

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="420" viewBox="0 0 1440 420" role="img" aria-labelledby="title desc">
+<title id="title">Banan Menu</title>
+<desc id="desc">Original purple geometric B monogram and typography on a dark background. An in-game menu for Hellraiser: Revival. Insert or F8.</desc>
+<defs>
+  <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0b0b0f"/><stop offset="1" stop-color="#1e132b"/></linearGradient>
+  <linearGradient id="accent" x2="1" y2="1"><stop stop-color="#c491ee"/><stop offset="1" stop-color="#8251b2"/></linearGradient>
+  <pattern id="grid" width="52" height="52" patternUnits="userSpaceOnUse"><path d="M52 0H0V52" fill="none" stroke="#ac6ee2" stroke-opacity=".07"/></pattern>
+</defs>
+<rect width="1440" height="420" rx="24" fill="url(#bg)"/>
+<rect width="1440" height="420" rx="24" fill="url(#grid)"/>
+<path d="M1040 0 780 420M1190 0 930 420M1340 0 1080 420M1490 0 1230 420" fill="none" stroke="#ac6ee2" stroke-opacity=".1" stroke-width="2"/>
+<rect x="68" y="72" width="276" height="276" rx="66" fill="#121218" stroke="#ac6ee2" stroke-opacity=".3"/>
+<path d="M147 128H215C261 128 281 151 281 177C281 195 271 208 256 215C277 222 289 236 289 256C289 286 264 304 220 304H147ZM180 158V200H214C236 200 247 192 247 179C247 165 236 158 214 158ZM180 230V274H218C242 274 254 267 254 252C254 237 242 230 218 230Z" fill="url(#accent)"/>
+<circle cx="305" cy="110" r="7" fill="#f89fcd"/>
+<g font-family="Inter, Segoe UI, Arial, sans-serif">
+  <text x="398" y="130" font-size="16" letter-spacing="5" fill="#c491ee">HELLRAISER: REVIVAL · PC</text>
+  <text x="392" y="221" font-size="83" font-weight="700" letter-spacing="-3" fill="#f2f2f6">Banan Menu</text>
+  <text x="398" y="268" font-size="23" fill="#b9b3c1">Your game. Your controls.</text>
+  <rect x="398" y="303" width="116" height="40" rx="9" fill="#262031" stroke="#584365"/>
+  <text x="456" y="329" font-size="17" text-anchor="middle" fill="#f2f2f6">INSERT</text>
+  <text x="531" y="329" font-size="16" fill="#8e8e9a">/</text>
+  <rect x="552" y="303" width="63" height="40" rx="9" fill="#262031" stroke="#584365"/>
+  <text x="584" y="329" font-size="17" text-anchor="middle" fill="#f2f2f6">F8</text>
+  <text x="637" y="329" font-size="17" fill="#b9b3c1">Open the menu</text>
+</g>
+<path d="M1245 102 1325 148V240L1245 286 1165 240V148ZM1245 102V194L1325 240M1165 148 1245 194 1325 148M1245 194V286" fill="none" stroke="#ac6ee2" stroke-opacity=".38" stroke-width="2"/>
+<path d="M68 385H1372" stroke="#ac6ee2" stroke-opacity=".18"/>
+</svg>

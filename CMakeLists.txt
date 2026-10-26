@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(BananMenu VERSION 1.0.0 LANGUAGES C CXX ASM_MASM)
-set(BANAN_VERSION "1.0.0-dev.9")
+set(BANAN_VERSION "1.0.0")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -92,3 +92,8 @@ add_test(NAME ue_cache_test COMMAND ue_cache_test)
 # Minimal DX11/DX12 app that loads the DLL, toggles the menu and saves a screenshot (manual check of the overlay).
 add_executable(overlay_host tests/overlay_host.cpp)
 target_link_libraries(overlay_host PRIVATE d3d11 d3d12 dxgi)
+
+# Run the exact version parser used by the packager, including rejected declarations.
+find_program(BANAN_POWERSHELL NAMES pwsh powershell REQUIRED)
+add_test(NAME package_version_test
+    COMMAND "${BANAN_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass -File "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_version_test.ps1")
