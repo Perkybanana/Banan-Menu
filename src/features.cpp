@@ -543,7 +543,7 @@ bool EnemyConfiguration(int type)
     if (!selected) return false;
     UObject* defaults = Cdo(Name(reinterpret_cast<UObject*>(selected)).c_str());
     // Inspect the selected Blueprint CDO, not an empty native ancestor. Mesh variant selection
-    // itself belongs to SpawnThreat/Blueprint initialization; do not guess a mesh or subtype.
+    // itself belongs to SpawnThreat/Blueprint initialization; do not guess a mesh.
     return defaults && IsDefaultObject(defaults) && ClassOf(defaults) == selected &&
         TypedObject(defaults, "CharacterSettings", "EnemySettings");
 }
@@ -651,6 +651,29 @@ bool SpawnClass(int type)
     load.ArgRaw(0, native.value.data(), native.value.size());
     return SpawnerRun(load) && SelectedEnemyClass(type) &&
         load.Out<UObject*>("ReturnValue") == reinterpret_cast<UObject*>(SelectedEnemyClass(type));
+}
+
+uint64_t SpawnSubtypeName(int type)
+{
+    if (type < 0 || type >= spawn::TypeCount) return 0;
+    const std::string text = spawn::Types[type].subtype;
+    if (text.empty() || text == "None") return 0;
+    std::wstring wide(text.begin(), text.end());
+    FString input{wide.data(), int32_t(wide.size() + 1), int32_t(wide.size() + 1)};
+    auto convert = SpawnerCall(SpawnerLibrary("KismetStringLibrary"), "Conv_StringToName",
+        {{"InString", Kind::String, 16}, {"ReturnValue", Kind::Name, 8, nullptr, true}});
+    convert.Arg("InString", input);
+    if (!SpawnerRun(convert)) return 0;
+    const uint64_t value = convert.Out<uint64_t>("ReturnValue");
+    return value && NameToString(&value) == text ? value : 0;
+}
+
+bool PrepareSpawnSubtype(SpawnInfoValue& info, int type, uint64_t name, const char*& field)
+{
+    field = "ReturnValue";
+    const auto* fn = reinterpret_cast<UClass*>(FindFunction(FindClass("EnemyManagerSubsystem"), "MakeSpawnInfo", true));
+    const Prop result = FindProp(fn, "ReturnValue", true);
+    return result.Is(Kind::Struct, 336) && spawn::PrepareSubtype(info, static_cast<const UClass*>(result.inner), type, name, field);
 }
 
 uint64_t SpawnMarker()
@@ -2166,6 +2189,8 @@ void SpawnEnemies(int type, int count)
         const char* failure = "Native enemy spawn request failed.";
         bool dispatched = false;
         bool preparingSeed = false;
+        bool preparingSubtype = false;
+        const char* subtypeField = "EnemySubtype conversion";
         std::function<void()> work = [&] {
             if (*context.Why()) { failure = "Level changed; spawning stopped."; return; }
             if (!SpawnerAPIs()) { failure = "Native enemy spawner API unavailable."; return; }
@@ -2182,6 +2207,13 @@ void SpawnEnemies(int type, int count)
             failure = "Native spawn defaults validation failed; see the log for the field and stage.";
             if (!SpawnSeed(manager)) return;
             preparingSeed = false;
+            preparingSubtype = true;
+            failure = "Enemy subtype preparation failed; see the log for the field.";
+            const uint64_t subtype = SpawnSubtypeName(type);
+            // Preflight conversion and fresh nested reflection before any actor dispatch.
+            SpawnInfoValue subtypePreflight = g_spawnSeed.value;
+            if (!subtype || !PrepareSpawnSubtype(subtypePreflight, type, subtype, subtypeField)) return;
+            preparingSubtype = false;
             failure = "Native enemy spawn request failed.";
             if (*context.Why()) { failure = "Level changed; spawning stopped."; return; }
             auto position = SpawnerCall(context.player.Get(), "K2_GetActorLocation", {{"ReturnValue", Kind::Struct, 24, "Vector", true}});
@@ -2215,6 +2247,11 @@ void SpawnEnemies(int type, int count)
                 manager = SpawnManager(context);
                 if (!manager || !SelectedEnemyClass(type)) return;
                 SpawnInfoValue info = g_spawnSeed.value; // borrowed native members, NEVER destroyed as an owning struct
+                preparingSubtype = true;
+                failure = "Enemy subtype preparation failed; see the log for the field.";
+                if (!PrepareSpawnSubtype(info, type, subtype, subtypeField)) return;
+                preparingSubtype = false;
+                failure = "Native enemy spawn request failed.";
                 const Rot heading{0, facing.yaw, 0};
                 memcpy(info.data() + typeField.offset, g_spawnClasses[type].value.data(), 40);
                 memcpy(info.data() + atField.offset, &positions[i], 24);
@@ -2238,6 +2275,9 @@ void SpawnEnemies(int type, int count)
             if (preparingSeed)
                 km::Log("Enemy spawner: native defaults rejected; field=%s; stage=%s%s",
                     g_spawnSeed.field, g_spawnSeed.stage, guarded ? "" : " (guarded fault)");
+            if (preparingSubtype)
+                km::Log("Enemy spawner: authored subtype rejected for %s; field=%s%s",
+                    spawn::Types[type].label, subtypeField, guarded ? "" : " (guarded fault)");
             g_spawnPending.request.Fail();
             FinishSpawn(failure);
             return;

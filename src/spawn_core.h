@@ -47,14 +47,14 @@ private:
     uint64_t started_ = 0;
     spawn::Result result_ = spawn::Result::Idle;
 };
-struct Type { const char* label; const char* path; };
+struct Type { const char* label; const char* path; const char* subtype; };
 // Exact generated classes observed in the game's helper defaults. Never accept a caller-supplied path.
 inline constexpr Type Types[TypeCount] = {
-    {"Hellghoul", "/Game/Blueprints/Characters/Enemies/Hellghoul/CH_Hellghoul.CH_Hellghoul_C"},
-    {"Exploding Hellghoul", "/Game/Blueprints/Characters/Enemies/Hellghoul/Hellghoul_Exploding/CH_Hellghoul_Exploding.CH_Hellghoul_Exploding_C"},
-    {"Cambion", "/Game/Blueprints/Characters/Enemies/Cambion/CH_Cambion.CH_Cambion_C"},
-    {"Cultist", "/Game/Blueprints/Characters/Enemies/Cultist/CH_Cultist.CH_Cultist_C"},
-    {"Runner", "/Game/Blueprints/Characters/Enemies/Runner/CH_Runner.CH_Runner_C"},
+    {"Hellghoul", "/Game/Blueprints/Characters/Enemies/Hellghoul/CH_Hellghoul.CH_Hellghoul_C", "Enemies.Hellghoul.Types.Default"},
+    {"Exploding Hellghoul", "/Game/Blueprints/Characters/Enemies/Hellghoul/Hellghoul_Exploding/CH_Hellghoul_Exploding.CH_Hellghoul_Exploding_C", "Enemies.HellghoulExploding.Types.Default"},
+    {"Cambion", "/Game/Blueprints/Characters/Enemies/Cambion/CH_Cambion.CH_Cambion_C", "Enemies.Cambion.Types.ArenaTwoCombat"},
+    {"Cultist", "/Game/Blueprints/Characters/Enemies/Cultist/CH_Cultist.CH_Cultist_C", "Enemies.Cultist.Types.Ranged"},
+    {"Runner", "/Game/Blueprints/Characters/Enemies/Runner/CH_Runner.CH_Runner_C", "Enemies.Runner.Types.Default"},
 };
 struct Point { double x = 0, y = 0, z = 0; };
 inline bool ValidRequest(int type, int count) { return type >= 0 && type < TypeCount && count >= 1 && count <= MaxCount; }

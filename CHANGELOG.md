@@ -1,5 +1,10 @@
 # Changes
 
+## 1.0.0-dev.8 — development candidate, 2026-10-26
+
+- Populate each request's reflected EnemySubtype.TagName with its fixed authored configuration key before native dispatch. An empty subtype skipped the native controller setter and configured ability preloading/granting, even when the controller's default type already matched. The shared native seed and other spawn defaults remain unchanged.
+- Added production preparation regressions for all five mappings, relocated fields, incompatible metadata and unchanged seed/hearing bytes. Cambion uses the authored ArenaTwoCombat configuration as a combat candidate. Structural initialization/model readiness is unchanged; combat for all five types, exploding behavior and runtime acceptance remain pending. This is not a stable release.
+
 ## 1.0.0-dev.7 — development candidate, 2026-10-26
 
 - Dev.6 passed ownership preflight but failed native-default validation before spawn dispatch. The null-input native builder left the optional hearing-curve override uninitialized. Free-spawn requests now explicitly select no override in the owned seed after reflected type, class, shape and bounds checks; all other native-default and lifecycle guards remain.

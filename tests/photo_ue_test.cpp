@@ -377,5 +377,95 @@ int main() {
     Put(seedStruct.data(), 0x18, NameId("OtherStruct")); rejectsUnchanged();
     Check(!strcmp(preparationField, "ReturnValue.SpawnInfo"), "diagnostic identifies incompatible aggregate metadata");
     Check(!spawn::PrepareSeed(rejected, nullptr, preparationField) && rejected == unchanged, "missing seed struct rejects without writes");
+    // A skipped subtype write, cached layout, or mutation of the retained seed must fail.
+    Put(seedStruct.data(), 0x18, NameId("SpawnInfo"));
+    std::array<uint8_t, 0x160> subtypeField{}, subtypeType{}, tagStruct{}, tagField{}, nameType{};
+    Put(hearingField.data(), 0x20, NameId("HearingDistanceCurveOverride"));
+    Put(hearingField.data(), 0x44, int32_t(16));
+    Put(hearingField.data(), 0x18, subtypeField.data());
+    Put(subtypeField.data(), 8, subtypeType.data());
+    Put(subtypeType.data(), 0, NameId("StructProperty"));
+    Put(subtypeField.data(), 0x20, NameId("EnemySubtype"));
+    Put(subtypeField.data(), 0x30, int32_t(1));
+    Put(subtypeField.data(), 0x34, int32_t(8));
+    Put(subtypeField.data(), 0x70, tagStruct.data());
+    Put(tagStruct.data(), 0x18, NameId("GameplayTag"));
+    Put(tagStruct.data(), 0x58, int32_t(8));
+    Put(tagStruct.data(), 0x50, tagField.data());
+    Put(tagField.data(), 8, nameType.data());
+    Put(nameType.data(), 0, NameId("NameProperty"));
+    Put(tagField.data(), 0x20, NameId("TagName"));
+    Put(tagField.data(), 0x30, int32_t(1));
+    Put(tagField.data(), 0x34, int32_t(8));
+    Put(tagField.data(), 0x44, int32_t(0));
+    const char* authored[] = {"Enemies.Hellghoul.Types.Default", "Enemies.HellghoulExploding.Types.Default",
+        "Enemies.Cambion.Types.ArenaTwoCombat", "Enemies.Cultist.Types.Ranged", "Enemies.Runner.Types.Default"};
+    std::array<uint64_t, 5> authoredNames{};
+    for (int type = 0; type < 5; ++type) authoredNames[type] = NameId(authored[type]);
+    spawn::SpawnInfoValue retained;
+    retained.fill(0xA5);
+    Check(spawn::PrepareSeed(retained, seedType, preparationField), "optional hearing preparation still succeeds");
+    const auto retainedBefore = retained;
+    for (int offset : {0, 64, 328}) {
+        Put(subtypeField.data(), 0x44, int32_t(offset));
+        // Prime a stale cached offset: production must resolve this field freshly.
+        ue::FindProp(seedType, "EnemySubtype");
+        for (int type = 0; type < 5; ++type) {
+            auto copy = retained;
+            auto expected = retained;
+            Put(expected.data(), size_t(offset), authoredNames[type]);
+            Check(spawn::PrepareSubtype(copy, seedType, type, authoredNames[type], preparationField),
+                "authored subtype prepares each selected catalog entry");
+            Check(copy == expected && retained == retainedBefore,
+                "only owned copy typed tag name changes; hearing null and other seed bytes survive");
+        }
+    }
+    auto rejectsSubtype = [&](int type = 0, uint64_t name = 0) {
+        auto copy = retained;
+        Check(!spawn::PrepareSubtype(copy, seedType, type, name ? name : authoredNames[0], preparationField) && copy == retained,
+            "incompatible subtype input or metadata rejects without writes");
+    };
+    Put(subtypeField.data(), 0x44, int32_t(64));
+    for (int type : {-1, 5, INT32_MAX}) rejectsSubtype(type);
+    for (int type = 0; type < 5; ++type) rejectsSubtype(type, authoredNames[(type + 1) % 5]);
+    for (uint64_t empty : {uint64_t(0), uint64_t(NameId("None")), uint64_t(NameId(""))}) {
+        auto copy = retained;
+        Check(!spawn::PrepareSubtype(copy, seedType, 0, empty, preparationField) && copy == retained,
+            "empty and None subtype reject without writes");
+    }
+    rejectsSubtype(0, authoredNames[0] | (uint64_t(1) << 32));
+    for (int offset : {-1, 329, 336, INT32_MAX}) { Put(subtypeField.data(), 0x44, int32_t(offset)); rejectsSubtype(); }
+    Put(subtypeField.data(), 0x44, int32_t(64));
+    for (int offset : {-1, 1, 8, INT32_MAX}) { Put(tagField.data(), 0x44, int32_t(offset)); rejectsSubtype(); }
+    Put(tagField.data(), 0x44, int32_t(0));
+    for (auto* fieldBytes : {subtypeField.data(), tagField.data()}) {
+        for (int size : {0, 4, 16}) { Put(fieldBytes, 0x34, int32_t(size)); rejectsSubtype(); }
+        Put(fieldBytes, 0x34, int32_t(8));
+        for (int dim : {0, 2}) { Put(fieldBytes, 0x30, int32_t(dim)); rejectsSubtype(); }
+        Put(fieldBytes, 0x30, int32_t(1));
+        Put(fieldBytes, 0x20, NameId("WrongField")); rejectsSubtype();
+        Put(fieldBytes, 0x20, NameId(fieldBytes == subtypeField.data() ? "EnemySubtype" : "TagName"));
+    }
+    Put(subtypeType.data(), 0, NameId("NameProperty")); rejectsSubtype();
+    Put(subtypeType.data(), 0, NameId("StructProperty"));
+    Put(nameType.data(), 0, NameId("ObjectProperty")); rejectsSubtype();
+    Put(nameType.data(), 0, NameId("NameProperty"));
+    for (int size : {0, 7, 9, 16}) { Put(tagStruct.data(), 0x58, int32_t(size)); rejectsSubtype(); }
+    Put(tagStruct.data(), 0x58, int32_t(8));
+    Put(tagStruct.data(), 0x18, NameId("WrongTag")); rejectsSubtype();
+    Put(tagStruct.data(), 0x18, NameId("GameplayTag"));
+    Put(subtypeField.data(), 0x70, static_cast<void*>(nullptr)); rejectsSubtype();
+    Put(subtypeField.data(), 0x70, tagStruct.data());
+    Put(tagStruct.data(), 0x50, static_cast<void*>(nullptr)); rejectsSubtype();
+    Put(tagStruct.data(), 0x50, tagField.data());
+    Put(hearingField.data(), 0x18, static_cast<void*>(nullptr)); rejectsSubtype();
+    Put(hearingField.data(), 0x18, subtypeField.data());
+    for (int size : {0, 335, 337}) { Put(seedStruct.data(), 0x58, int32_t(size)); rejectsSubtype(); }
+    Put(seedStruct.data(), 0x58, int32_t(336));
+    Put(seedStruct.data(), 0x18, NameId("WrongStruct")); rejectsSubtype();
+    Put(seedStruct.data(), 0x18, NameId("SpawnInfo"));
+    auto copy = retained;
+    Check(!spawn::PrepareSubtype(copy, nullptr, 0, authoredNames[0], preparationField) && copy == retained,
+        "missing subtype aggregate rejects without writes");
     puts("Photo/spawn reflection and object-generation tests passed");
 }

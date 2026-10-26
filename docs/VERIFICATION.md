@@ -1,6 +1,6 @@
 # Development verification scope
 
-This records the scope of 1.0.0-dev.7 development work as of 2026-10-26. It is not stable-release acceptance.
+This records the scope of 1.0.0-dev.8 development work as of 2026-10-26. It is not stable-release acceptance.
 
 | Area | Evidence and limits |
 | --- | --- |
@@ -14,6 +14,7 @@ This records the scope of 1.0.0-dev.7 development work as of 2026-10-26. It is n
 | Dev.6 array metadata correction | Dev.5 failed the Chapter5 Hellghoul/count-1 attempt at manager ownership preflight, before SpawnThreat dispatch. Class/settings loading precedes that check. Dev.6 corrects reflected array-element decoding, with production-path regressions for strong object, name and struct arrays and unchanged ordinary object/struct/enum behavior. Native initialization, visibility/AI and Genesis acceptance remain pending. |
 | Dev.7 optional hearing override | Dev.6 Chapter5 attempts passed ownership checks but stopped at native-default validation before SpawnThreat. Read-only evidence found an uninitialized optional hearing-curve pointer in the native builder's null-input return; the native consumer treats null as no override. The owned seed now explicitly selects null only after reflected ObjectProperty/CurveFloat, scalar size, aggregate and bounds checks. Other defaults and lifecycle guards remain strict. Production preparation tests cover invalid incoming words, exact isolated write and unchanged bytes on rejected metadata; failures retain field/stage diagnostics across explicit attempts. Native spawn, visibility/AI and Genesis acceptance remain pending. |
 | Live-checkpoint teleport | Moves to an existing loaded checkpoint; not a complete story-state start. |
+| Dev.8 authored enemy subtypes | Dev.7 models and user-reported Genesis finisher worked, but offensive AI remained incomplete. Empty EnemySubtype bypassed the native configured-ability setter/preload/grant path. Each local SpawnInfo copy now receives its fixed authored tag through fresh GameplayTag/TagName reflection after checked native name conversion; native initialization applies it once. Offline regressions cover all five mappings, bounds, rejected metadata without writes, and preserved seed/hearing bytes. Cambion has no generic Default and uses ArenaTwoCombat as a combat candidate. All five combat behaviors, explosion, asynchronous ability grants and gameplay acceptance remain pending. Finished-init/model polling is structural only; LinkedAbilities is not a readiness requirement. |
 | Arbitrary checkpoint starts | Outside current scope by owner decision on 2026-10-25; no independent story-state pack/loader is planned. Native episode/chapter selection is retained. |
 | Recoil, attack speed, hand visibility | Removed from the current work scope by owner decision on 2026-10-25. |
 | Unusual weapons / possible cut content | Research only; no confirmed-functionality claim. |
