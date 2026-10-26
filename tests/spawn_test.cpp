@@ -44,6 +44,34 @@ int main()
     CHECK(request.Ready() == 0 && request.Pending());
     request.Fail();
     CHECK(!request.Pending() && request.Result() == spawn::Result::Dispatch);
+    for (uint64_t observed : {15099ull, 15100ull, 15101ull}) {
+        CHECK(request.Begin(true, 1, 100) && request.Bind(0, {61}));
+        request.Observe(0, {61}, true, true, true);
+        request.Poll(true, observed);
+        CHECK(request.Result() == (observed < 15100 ? spawn::Result::Success : spawn::Result::Timeout));
+        request.Poll(false, 20000); // terminal success/timeout must not be rewritten
+        CHECK(request.Result() == (observed < 15100 ? spawn::Result::Success : spawn::Result::Timeout));
+    }
+    CHECK(request.Begin(true, 2, 100) && request.Bind(0, {71}) && request.Bind(1, {72}));
+    request.Observe(0, {71}, true, true, true);
+    request.Poll(true, 15099);
+    CHECK(request.Pending() && request.Ready() == 1);
+    request.Poll(true, 15100);
+    CHECK(request.Result() == spawn::Result::Timeout && request.Ready() == 1);
+    CHECK(request.Begin(true, 1, 100) && request.Bind(0, {81}));
+    request.Observe(0, {81}, true, true, true);
+    request.Poll(false, 15100);
+    CHECK(request.Result() == spawn::Result::Transition); // transition takes precedence over expiry/readiness
+    for (uint64_t afterWork : {15099ull, 15100ull, 15101ull}) {
+        CHECK(request.Begin(true, 2, 100) && request.Bind(0, {91}) && request.Bind(1, {92}));
+        request.Observe(0, {91}, true, true, true);
+        CHECK(request.CheckDeadline(true, 15098)); // time before the native readiness work
+        // Same production integration seam: check FRESH time before delivering an observation.
+        if (request.CheckDeadline(true, afterWork)) request.Observe(1, {92}, true, true, true);
+        request.Poll(true, afterWork);
+        CHECK(request.Result() == (afterWork < 15100 ? spawn::Result::Success : spawn::Result::Timeout));
+        CHECK(request.Ready() == (afterWork < 15100 ? 2 : 1)); // expiry preserves only already-observed partial readiness
+    }
     CHECK(spawn::ValidRequest(0, 1));
     CHECK(spawn::ValidRequest(4, 5));
     for (int type : {-1, 5, 999}) CHECK(!spawn::ValidRequest(type, 1));

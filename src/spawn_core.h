@@ -27,11 +27,14 @@ public:
         if (!owned || identity != ids_[slot]) { ready_[slot] = false; result_ = spawn::Result::Stale; return; }
         ready_[slot] = initialized && mesh;
     }
-    void Poll(bool context, uint64_t now) {
-        if (!Pending()) return;
+    bool CheckDeadline(bool context, uint64_t now) {
+        if (!Pending()) return false;
         if (!context) result_ = spawn::Result::Transition;
-        else if (Ready() == count_) result_ = spawn::Result::Success;
         else if (now - started_ >= TimeoutMs) result_ = spawn::Result::Timeout;
+        return Pending();
+    }
+    void Poll(bool context, uint64_t now) {
+        if (CheckDeadline(context, now) && Ready() == count_) result_ = spawn::Result::Success;
     }
     void Fail() { if (Pending()) result_ = spawn::Result::Dispatch; }
     bool Pending() const { return result_ == spawn::Result::Pending; }

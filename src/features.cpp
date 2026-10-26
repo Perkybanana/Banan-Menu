@@ -702,14 +702,19 @@ void TickSpawner(uint64_t now)
 {
     auto& pending = g_spawnPending;
     if (!pending.request.Pending()) return;
-    if (now - pending.pollAt < 100) return;
-    pending.pollAt = now;
+    auto withinDeadline = [&] {
+        const bool context = !*pending.context.Why();
+        return pending.request.CheckDeadline(context, GetTickCount64());
+    };
     std::function<void()> poll = [&] {
-        if (*pending.context.Why()) { pending.request.Poll(false, now); return; }
+        if (!withinDeadline()) return; // expiry/transition precede throttling and further work
+        if (now - pending.pollAt < 100) return;
+        pending.pollAt = now;
         UObject* manager = SpawnManager(pending.context);
         std::vector<UObject*> alive, dead;
         if (!OwnedEnemies(manager, "AliveEnemies", alive) || !OwnedEnemies(manager, "DeadEnemies", dead)) { pending.request.Fail(); return; }
         for (int i = 0; i < pending.count && pending.request.Pending(); ++i) {
+            if (!withinDeadline()) return;
             UObject* match = nullptr;
             int matches = 0;
             for (UObject* enemy : alive) {
@@ -725,20 +730,24 @@ void TickSpawner(uint64_t now)
                 if (tags) ++matches; // a dead target can never satisfy readiness
             }
             if (matches != 1 || !match) {
+                if (!withinDeadline()) return;
                 if (matches || pending.seen[i]) pending.request.Observe(i, {pending.markers[i]}, false, false, false);
                 continue; // not in manager yet: remain pending until deadline
             }
             const FreshWorldActor actor(pending.context.world, match, SelectedEnemyClass(pending.type));
             if (!actor.Get() || (pending.targets[i].obj && pending.targets[i].Get() != match)) {
+                if (!withinDeadline()) return;
                 pending.request.Observe(i, {pending.markers[i]}, false, false, false); continue;
             }
             pending.seen[i] = true;
             if (!pending.targets[i].obj) pending.targets[i] = GenerationRef(match); // stays empty for serial-zero actors
+            if (!withinDeadline()) return; // do not invoke another completion getter after expiry
             const bool initialized = EnemyInitialized(actor.Get());
+            if (!withinDeadline()) return; // the getter may have crossed the deadline
             // Native getters can dispatch Blueprint events: re-resolve ownership and identity afterward.
             std::vector<UObject*> current, currentDead;
             manager = SpawnManager(pending.context);
-            if (*pending.context.Why()) { pending.request.Poll(false, now); return; }
+            if (!withinDeadline()) return;
             bool owned = actor.Get() && OwnedEnemies(manager, "AliveEnemies", current) && OwnedEnemies(manager, "DeadEnemies", currentDead) &&
                 std::count(current.begin(), current.end(), match) == 1 && (!pending.targets[i].obj || pending.targets[i].Get() == match);
             int markerCount = 0;
@@ -753,9 +762,12 @@ void TickSpawner(uint64_t now)
                 }
                 owned = owned && markerCount == 1 && HasSpawnMarker(actor.Get(), pending.markers[i]) == 1;
             }
-            pending.request.Observe(i, {pending.markers[i]}, owned, initialized, owned && EnemyModelReady(actor.Get()));
+            const bool model = owned && EnemyModelReady(actor.Get());
+            if (!withinDeadline()) return; // fresh time after scans/model work, before accepting this observation
+            pending.request.Observe(i, {pending.markers[i]}, owned, initialized, model);
         }
-        pending.request.Poll(!*pending.context.Why(), now);
+        const bool context = !*pending.context.Why();
+        pending.request.Poll(context, GetTickCount64());
     };
     if (!Guard(poll)) pending.request.Fail();
     s.enemySpawnerCreated = pending.request.Ready();
