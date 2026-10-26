@@ -1,6 +1,6 @@
 # Banan Menu for Hellraiser: Revival
 
-**1.0.0-dev.4 is a development candidate for the Windows Steam game, not a verified stable 1.0.0 release.** Dev.3's native spawner panel failed gameplay acceptance: its list was empty and Spawn did nothing. Dev.4 replaces that entry with a fixed five-type spawner; actual spawning and enemy behavior remain pending gameplay acceptance. Native episode/chapter selection is supported; arbitrary checkpoint starts are outside the current scope.
+**1.0.0-dev.5 is a development candidate for the Windows Steam game, not a verified stable 1.0.0 release.** Dev.3's panel was nonfunctional. Dev.4 produced invisible/inert enemies, and a Genesis execution after Kill nearby crashed with a missing model. Dev.5 uses the game's full enemy-manager initialization and checks completion/model readiness; gameplay acceptance remains pending. Native episode/chapter selection is supported; arbitrary checkpoint starts are outside the current scope.
 
 [Русская версия](README.ru.md) · [Changes](CHANGELOG.md) · [Verification scope](docs/VERIFICATION.md)
 
@@ -12,7 +12,7 @@
 - Inventory: money, six carried crafting-material totals (0..9999), item browser, favorites and explicit item kits; settings profiles with local persistence.
 - Progress controls for current objectives, shop level and Steam achievements; native chapter selection remains available. Language, scaling and hotkeys are configurable.
 - Three guarded, session-only camera bookmarks. On 2026-10-25 the user accepted dev.2 Save, move/rotate and Restore on Chapter5, and separately accepted wrong-map Restore blocking after a menu/chapter transition without a crash. Other slots, FOV and death variants have not all been tested.
-- World → Enemy spawner offers Hellghoul, Exploding Hellghoul, Cambion, Cultist and Runner, with an explicit count of 1–5. The menu stays open. Only the selected class loads on click; the first load may pause briefly. Placement is in front of the pawn with spacing for multiple actors, and collision checks can block creation. Status counts completed actors, including partial failures; it does not confirm enemy AI/combat behavior.
+- World → Enemy spawner offers Hellghoul, Exploding Hellghoul, Cambion, Cultist and Runner, with an explicit count of 1–5. The menu stays open. Only the selected class loads on click; the first load may pause briefly. Native manager requests place enemies in front of the pawn with spacing. Status stays pending for up to 15 seconds and counts only the correlated enemies with completed native initialization and a usable model. Missing settings, incomplete models and changed levels report failure/partial readiness. Kill nearby skips enemies whose initialization/model is not ready. These checks do not establish AI, combat or finisher acceptance.
 
 Available controls depend on the current player/map and supported native game interfaces. Kits request item delivery and may encounter the existing native capacity/drop behavior; they are not atomic equip/loadouts. Teleporting to a live checkpoint does not start a complete story state. Recoil, attack speed and hand visibility were removed from the current work scope by owner decision. Unusual weapons and possible cut content remain research; their functionality is not confirmed.
 
@@ -37,7 +37,7 @@ ctest --test-dir build -C Release --output-on-failure
 powershell -NoProfile -File scripts/package.ps1 -BuildDirectory build -OutputDirectory packages
 ```
 
-The packager accepts only the normal Release DLL and the documentation/license allowlist. It produces `BananMenu-1.0.0-dev.4-win64.zip` and a JSON hash/size manifest with the source commit and candidate version. Existing targets cause a failure unless `-Force` is explicitly supplied. Compare the extracted DLL's SHA-256 with the manifest before installation. Consult the release notes for the candidate you install and the [recorded scan evidence](docs/VERIFICATION.md). A scan result applies only to its exact recorded DLL hash; a different build needs its own evidence. Scanning does not guarantee absence of all malicious code or establish in-game acceptance.
+The packager accepts only the normal Release DLL and the documentation/license allowlist. It produces `BananMenu-1.0.0-dev.5-win64.zip` and a JSON hash/size manifest with the source commit and candidate version. Existing targets cause a failure unless `-Force` is explicitly supplied. Compare the extracted DLL's SHA-256 with the manifest before installation. Consult the release notes for the candidate you install and the [recorded scan evidence](docs/VERIFICATION.md). A scan result applies only to its exact recorded DLL hash; a different build needs its own evidence. Scanning does not guarantee absence of all malicious code or establish in-game acceptance.
 
 The Windows workflow builds, tests and uploads a development artifact; it does not publish a GitHub Release. For contributions, keep game mutations on the game thread, render from copied snapshots, and add user-facing RU/EN text to `src/lang.cpp`. Run the build and tests above and describe the actual runtime verification performed.
 

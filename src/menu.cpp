@@ -849,10 +849,10 @@ void TabWorld(const feat::Snapshot& s)
     ImGui::SliderInt(T("Enemy count"), &enemyCount, 1, spawn::MaxCount, "%d", ImGuiSliderFlags_AlwaysClamp);
     if (ImGui::Button(T("Spawn enemies"))) feat::SpawnEnemies(enemyType, enemyCount);
     ImGui::EndDisabled();
-    Hint("Creates 1–5 selected enemies in front of you when space is available. The first class load may take a moment.");
-    if (s.enemySpawnerBusy) ImGui::TextWrapped("%s", T("Creating enemies..."));
+    Hint("Requests 1–5 selected enemies in front of you and waits for initialization and models. The first class load may take a moment.");
+    if (s.enemySpawnerBusy) ImGui::TextWrapped("%s", T("Waiting for enemy initialization and model..."));
     if (!s.enemySpawnerReady && !s.enemySpawnerWhy.empty()) ImGui::TextWrapped("%s", T(s.enemySpawnerWhy.c_str()));
-    if (s.enemySpawnerRequested) ImGui::Text(T("Created %d of %d enemies."), s.enemySpawnerCreated, s.enemySpawnerRequested);
+    if (s.enemySpawnerRequested) ImGui::Text(T("Ready %d of %d enemies."), s.enemySpawnerCreated, s.enemySpawnerRequested);
     if (!s.enemySpawnerMessage.empty()) ImGui::TextWrapped("%s", T(s.enemySpawnerMessage.c_str()));
     Section("CAMERA & HUD");
     SliderRow(feat::Fov, "Field of view", "%.0f°", s, "Locks the camera field of view. Default gives control back to the game.",

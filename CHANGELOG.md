@@ -1,8 +1,14 @@
 # Changes
 
+## 1.0.0-dev.5 — development candidate, 2026-10-26
+
+- Replaced dev.4 bare actor construction after runtime failure: spawned Hellghoul/Cultist were invisible and inert; Genesis after Kill nearby crashed with a null skinned asset. The candidate now requests full native enemy-manager initialization from engine-built defaults, with selected Blueprint settings preflight.
+- Added asynchronous request correlation, actual finished-init/model readiness counts, a 15-second timeout, transition/identity guards and duplicate blocking. Kill nearby skips incomplete or model-less enemies and reports skipped counts. No AI/controller, mesh, lifecycle flag or callback is forced.
+- Retained one immutable native defaults value and five fixed class conversion values for bounded engine-allocation ownership; dispatch uses the reflected native copy path. Added production state/metadata regressions. All gameplay acceptance remains pending.
+
 ## 1.0.0-dev.4 — development candidate, 2026-10-25
 
-- Replaced the nonfunctional native panel with an explicit five-type World spawner, count 1–5, using reflected engine class conversion/loading and deferred actor construction. The menu stays open; nothing preloads/spawns automatically. Obstructed/failed creation stops the batch and reports the completed count. Actual spawning, AI and combat acceptance remain pending.
+- Replaced the nonfunctional native panel with an explicit five-type World spawner, count 1–5, using reflected engine class conversion/loading and deferred actor construction. The menu stays open; nothing preloads/spawns automatically. Obstructed/failed creation stops the batch and reports the completed count. **Failed runtime acceptance; replaced in dev.5.**
 - Fixed catalog comes from the game's helper defaults: Hellghoul, Exploding Hellghoul, Cambion, Cultist and Runner. New type/size/signature and operation-local world-ownership checks guard calls without weakening retained generation references. Added production-helper regressions for placement, bounds, signatures and newly created actor lifetimes.
 - Corrected native-panel diagnosis: the cheat-manager entry passes a null ObjectRef; the panel requires a configured helper Actor and spawners. Its standalone SpawnChosenEnemies graph also appears to skip count one. Dev.4 uses the verified engine construction primitives directly; it never over-spawns and deletes an extra actor.
 - Accepted camera/resources/profiles remain as recorded. Stable 1.0.0, arbitrary checkpoint starts, excluded combat/hand controls and unusual-content research retain their existing status.

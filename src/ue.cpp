@@ -477,6 +477,9 @@ Prop FindProp(const UClass* structOrClass, const char* name, bool uncached)
             else if (NameEquals(fieldClass, "SoftClassProperty")) prop.kind = Prop::Kind::SoftClass;
             else if (NameEquals(fieldClass, "StrProperty")) prop.kind = Prop::Kind::String;
             else if (NameEquals(fieldClass, "EnumProperty")) prop.kind = Prop::Kind::Enum;
+            else if (NameEquals(fieldClass, "BoolProperty")) prop.kind = Prop::Kind::Bool;
+            else if (NameEquals(fieldClass, "ArrayProperty")) prop.kind = Prop::Kind::Array;
+            else if (NameEquals(fieldClass, "NameProperty")) prop.kind = Prop::Kind::Name;
             if (NameEquals(fieldClass, "BoolProperty")) { // FieldSize, ByteOffset, ByteMask, FieldMask
                 prop.offset += Read<uint8_t>(f, off::PropExtra + 1);
                 prop.boolMask = Read<uint8_t>(f, off::PropExtra + 2);
@@ -491,6 +494,22 @@ Prop FindProp(const UClass* structOrClass, const char* name, bool uncached)
     std::lock_guard lock(g_cacheMutex);
     if (prop && !uncached) g_props[key] = {Weak(reinterpret_cast<UObject*>(const_cast<UClass*>(structOrClass))), prop};
     return prop;
+}
+
+Prop ArrayInner(const Prop& array)
+{
+    if (!array.Is(Prop::Kind::Array, 16) || !array.inner) return {};
+    Prop p;
+    p.field = array.inner;
+    p.offset = 0;
+    p.elementSize = Read<int32_t>(p.field, 0x34);
+    p.arrayDim = Read<int32_t>(p.field, 0x30);
+    const void* type = Read<const void*>(p.field, off::FFieldClass);
+    if (NameEquals(type, "ObjectProperty")) p.kind = Prop::Kind::Object;
+    else if (NameEquals(type, "NameProperty")) p.kind = Prop::Kind::Name;
+    else if (NameEquals(type, "StructProperty")) p.kind = Prop::Kind::Struct;
+    p.inner = Read<const void*>(p.field, off::PropExtra);
+    return p;
 }
 
 UFunction* FindFunction(const UClass* cls, const char* name, bool uncached)
@@ -567,6 +586,7 @@ bool Signature(const UClass* cls, const char* function, std::initializer_list<Pa
     for (const auto& expected : parameters) {
         const Prop p = FindProp(fn, expected.name, true);
         if (!p.Is(expected.kind, expected.size) || !(p.flags & 0x80) || bool(p.flags & 0x400) != expected.returns ||
+            (expected.kind == Prop::Kind::Bool && !p.boolMask) ||
             p.offset > size || p.elementSize > size - p.offset ||
             (expected.inner && (!p.inner || Name(static_cast<const UObject*>(p.inner)) != expected.inner))) return false;
         for (const Prop& previous : slots)

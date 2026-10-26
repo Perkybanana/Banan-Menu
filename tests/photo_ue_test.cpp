@@ -262,6 +262,18 @@ int main() {
     Put(overlapping, 0x20, NameId("Other")); Put(parameter, 0x18, overlapping);
     Check(!ue::Signature(expectedEnemy, "SpawnTest", {{"Count", Kind::Enum, 1}, {"Other", Kind::Enum, 1}}), "overlapping parameter slots rejected");
     Put(parameter, 0x18, static_cast<ue::UObject*>(nullptr));
+    Put(parameterType, 0, NameId("BoolProperty")); Put(parameter, 0x70, uint32_t(0xff010001));
+    Check(ue::Signature(expectedEnemy, "SpawnTest", {{"Count", Kind::Bool, 1}}), "native readiness boolean signature accepted");
+    Put(parameter, 0x70, uint32_t(0));
+    Check(!ue::Signature(expectedEnemy, "SpawnTest", {{"Count", Kind::Bool, 1}}), "invalid boolean mask rejected");
+    Put(parameterType, 0, NameId("ArrayProperty")); Put(parameter, 0x34, int32_t(16)); Put(parameter, 0x70, overlapping);
+    Put(overlapping, 8, enumObject); Put(enumObject, 0, NameId("ObjectProperty"));
+    Put(overlapping, 0x34, int32_t(8)); Put(overlapping, 0x30, int32_t(1)); Put(overlapping, 0x70, enemyClass);
+    auto array = ue::FindProp(reinterpret_cast<ue::UClass*>(signatureFunction), "Count", true);
+    Check(array.Is(Kind::Array, 16), "strong enemy array descriptor");
+    Check(ue::ArrayInner(array).Is(Kind::Object, 8) && ue::ArrayInner(array).inner == enemyClass, "strong enemy array element class");
+    Put(enumObject, 0, NameId("WeakObjectProperty"));
+    Check(!ue::ArrayInner(array).Is(Kind::Object, 8), "weak corpse array cannot substitute for strong enemy ownership");
     Put(signatureFunction, 0x50, static_cast<ue::UObject*>(nullptr)); Put(signatureFunction, 0x58, int32_t(0));
     Check(ue::Signature(expectedEnemy, "SpawnTest", {}), "exact no-argument cleanup signature accepted");
     puts("Photo/spawn reflection and object-generation tests passed");

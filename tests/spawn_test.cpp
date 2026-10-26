@@ -5,6 +5,45 @@
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "%d: %s\n", __LINE__, #x); std::exit(1); } } while (0)
 int main()
 {
+    // Actor existence must never count as completion; this is the production request reducer.
+    spawn::Request request;
+    CHECK(!request.Begin(false, 1, 100));
+    CHECK(!request.Pending() && request.Ready() == 0);
+    CHECK(request.Begin(true, 2, 100));
+    CHECK(!request.Begin(true, 1, 101));
+    CHECK(!request.Bind(0, {0})); // missing correlation is not actor identity
+    CHECK(request.Bind(0, {41}));
+    CHECK(!request.Bind(1, {41})); // another slot cannot alias a marker
+    CHECK(request.Bind(1, {42}));
+    request.Observe(0, {41}, true, false, true);
+    request.Observe(1, {42}, true, true, false);
+    CHECK(request.Ready() == 0 && request.Pending());
+    request.Observe(0, {41}, true, true, true);
+    CHECK(request.Ready() == 1 && request.Pending());
+    request.Observe(1, {43}, true, true, true); // different request cannot complete this slot
+    CHECK(request.Ready() == 1 && !request.Pending());
+    CHECK(request.Result() == spawn::Result::Stale);
+    CHECK(request.Begin(true, 1, 100));
+    request.Poll(true, 100 + spawn::TimeoutMs - 1);
+    CHECK(request.Pending() && request.Ready() == 0); // no manager completion is not success
+    request.Poll(true, 100 + spawn::TimeoutMs);
+    CHECK(request.Result() == spawn::Result::Timeout && request.Ready() == 0);
+    CHECK(request.Begin(true, 1, 100));
+    request.Poll(false, 101);
+    CHECK(request.Result() == spawn::Result::Transition);
+    CHECK(request.Begin(true, 1, 100) && request.Bind(0, {41}));
+    request.Observe(0, {41}, true, true, true);
+    request.Poll(true, 101);
+    CHECK(request.Ready() == 1 && request.Result() == spawn::Result::Success && !request.Pending());
+    CHECK(request.Begin(true, 1, 100) && request.Bind(0, {41}));
+    request.Observe(0, {41}, false, true, true);
+    CHECK(request.Result() == spawn::Result::Stale && request.Ready() == 0);
+    CHECK(request.Begin(true, 2, 100) && request.Bind(0, {51}) && request.Bind(1, {52}));
+    request.Observe(0, {51}, true, true, true);
+    request.Observe(0, {51}, true, false, true); // readiness can regress before the batch completes
+    CHECK(request.Ready() == 0 && request.Pending());
+    request.Fail();
+    CHECK(!request.Pending() && request.Result() == spawn::Result::Dispatch);
     CHECK(spawn::ValidRequest(0, 1));
     CHECK(spawn::ValidRequest(4, 5));
     for (int type : {-1, 5, 999}) CHECK(!spawn::ValidRequest(type, 1));

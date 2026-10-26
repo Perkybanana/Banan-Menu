@@ -100,6 +100,15 @@ struct SpawnerContext {
 };
 SpawnerContext g_spawnerContext;
 std::atomic<bool> g_spawnerBusy{false};
+struct SpawnPending {
+    SpawnerContext context;
+    spawn::Request request;
+    std::array<uint64_t, spawn::MaxCount> markers{};
+    std::array<GenerationRef, spawn::MaxCount> targets{}; // optional positive serials only
+    std::array<bool, spawn::MaxCount> seen{};
+    uint64_t pollAt = 0;
+    int type = 0, count = 0;
+} g_spawnPending;
 
 // A give that dropped items: copies beyond the asked amount are removed, also those the game spawns a moment later.
 struct DropWatch {
@@ -358,18 +367,54 @@ const std::initializer_list<Parameter> kMakeSoftClass = {
     {"SoftClassPath", Kind::Struct, 32, "SoftClassPath"}, {"ReturnValue", Kind::SoftClass, 40, "Class", true}};
 const std::initializer_list<Parameter> kLoadEnemyClass = {
     {"AssetClass", Kind::SoftClass, 40, "Class"}, {"ReturnValue", Kind::Class, 8, "Class", true}};
-const std::initializer_list<Parameter> kMakeSpawnTransform = {
-    {"Location", Kind::Struct, 24, "Vector"}, {"Rotation", Kind::Struct, 24, "Rotator"},
-    {"Scale", Kind::Struct, 24, "Vector"}, {"ReturnValue", Kind::Struct, 96, "Transform", true}};
-const std::initializer_list<Parameter> kBeginEnemy = {
-    {"WorldContextObject", Kind::Object, 8, "Object"}, {"ActorClass", Kind::Class, 8, "Class"},
-    {"SpawnTransform", Kind::Struct, 96, "Transform"},
-    {"CollisionHandlingOverride", Kind::Enum, 1, "ESpawnActorCollisionHandlingMethod"},
-    {"Owner", Kind::Object, 8, "Actor"}, {"TransformScaleMethod", Kind::Enum, 1, "ESpawnActorScaleMethod"},
-    {"ReturnValue", Kind::Object, 8, "Actor", true}};
-const std::initializer_list<Parameter> kFinishEnemy = {
-    {"Actor", Kind::Object, 8, "Actor"}, {"SpawnTransform", Kind::Struct, 96, "Transform"},
-    {"TransformScaleMethod", Kind::Enum, 1, "ESpawnActorScaleMethod"}, {"ReturnValue", Kind::Object, 8, "Actor", true}};
+const std::initializer_list<Parameter> kMakeSpawnInfo = {
+    {"SpawnPoint", Kind::Object, 8, "EnemySpawnPoint"}, {"Spawner", Kind::Object, 8, "EnemySpawner"},
+    {"ReturnValue", Kind::Struct, 336, "SpawnInfo", true}};
+const std::initializer_list<Parameter> kSpawnThreat = {
+    {"SpawnInfo", Kind::Struct, 336, "SpawnInfo"}, {"InSpawner", Kind::Object, 8, "EnemySpawner"}};
+const std::initializer_list<Parameter> kSpawnInitialized = {{"ReturnValue", Kind::Bool, 1, nullptr, true}};
+
+bool ExactSpawnerSignature(const char* cls, const char* fn, int size, std::initializer_list<Parameter> params)
+{
+    auto* owner = FindClass(cls);
+    return Signature(owner, fn, params) && StructSize(reinterpret_cast<UClass*>(FindFunction(owner, fn, true))) == size;
+}
+
+Prop SpawnField(const char* name, Kind kind, int size, const char* inner = nullptr)
+{
+    const auto* fn = reinterpret_cast<UClass*>(FindFunction(FindClass("EnemyManagerSubsystem"), "MakeSpawnInfo", true));
+    const Prop result = FindProp(fn, "ReturnValue", true);
+    if (!result.Is(Kind::Struct, 336) || !result.inner || Name(static_cast<const UObject*>(result.inner)) != "SpawnInfo" ||
+        StructSize(static_cast<const UClass*>(result.inner)) != 336) return {};
+    const Prop p = FindProp(static_cast<const UClass*>(result.inner), name, true);
+    return p.Is(kind, size) && p.offset <= 336 - size &&
+        (!inner || (p.inner && Name(static_cast<const UObject*>(p.inner)) == inner)) ? p : Prop{};
+}
+
+bool SpawnInfoLayout()
+{
+    const Parameter fields[] = {
+        {"EnemyTypePtr", Kind::SoftClass, 40}, {"SpawnLocation", Kind::Struct, 24, "Vector"}, {"SpawnRotation", Kind::Struct, 24, "Rotator"},
+        {"bEncounterSpawn", Kind::Bool, 1}, {"PatrolPath", Kind::Object, 8, "CorePatrolPath"}, {"EncounterID", Kind::Struct, 16, "Guid"},
+        {"EnemySubtype", Kind::Struct, 8, "GameplayTag"}, {"GrantedTags", Kind::Struct, 32, "GameplayTagContainer"},
+        {"LootDataDynamic", Kind::Object, 8, "DynamicLootManagerSettings"}, {"MeleeLootDataDynamic", Kind::Object, 8, "MeleeDynamicLootManagerSettings"},
+        {"MeleeWeponDurability", Kind::Int, 4}, {"ActorTags", Kind::Array, 16}, {"EnemyWeaponData", Kind::Struct, 16, "DataTableRowHandle"},
+        {"bAlwaysDropWeapon", Kind::Bool, 1}, {"TakedownAlertRadius", Kind::Float, 4}, {"VoiceIndex", Kind::Int, 4},
+        {"PerceptionActivationDelay", Kind::Float, 4}, {"MaxSeeHiddenDistanceOverride", Kind::Float, 4}, {"HearingDistanceCurveOverride", Kind::Object, 8, "CurveFloat"},
+        {"IgnoreCollisionOnSpawn", Kind::Bool, 1}, {"SkipTraceSoundTags", Kind::Array, 16}, {"SightAwarenessBuildupSpeedOverride", Kind::Float, 4},
+        {"TelekinesisObjectData", Kind::Array, 16}, {"SpecificEnemyData", Kind::Object, 8, "Object"}, {"KillInCombatAfterStillSeconds", Kind::Float, 4},
+        {"StartingHealthPercent", Kind::Float, 4}, {"MeshMinLOD", Kind::Int, 4}, {"OverrideLevel", Kind::Object, 8, "Level"}, {"bOptimizeSpawning", Kind::Bool, 1}};
+    std::array<bool, 336> used{};
+    for (const auto& expected : fields) {
+        const Prop p = SpawnField(expected.name, expected.kind, expected.size, expected.inner);
+        if (!p || (expected.kind == Kind::Bool && !p.boolMask)) return false;
+        for (int i = p.offset; i < p.offset + p.elementSize; ++i) {
+            if (used[i]) return false;
+            used[i] = true;
+        }
+    }
+    return true;
+}
 
 Call SpawnerCall(UObject* object, const char* function, std::initializer_list<Parameter> parameters)
 {
@@ -388,13 +433,18 @@ bool SpawnerAPIs()
         Signature(FindClass("KismetSystemLibrary"), "MakeSoftClassPath", kMakeClassPath) &&
         Signature(FindClass("KismetSystemLibrary"), "Conv_SoftClassPathToSoftClassRef", kMakeSoftClass) &&
         Signature(FindClass("KismetSystemLibrary"), "LoadClassAsset_Blocking", kLoadEnemyClass) &&
-        Signature(FindClass("KismetMathLibrary"), "MakeTransform", kMakeSpawnTransform) &&
-        Signature(FindClass("GameplayStatics"), "BeginDeferredActorSpawnFromClass", kBeginEnemy) &&
-        Signature(FindClass("GameplayStatics"), "FinishSpawningActor", kFinishEnemy) &&
+        ExactSpawnerSignature("KismetStringLibrary", "Conv_StringToName", 24,
+            {{"InString", Kind::String, 16}, {"ReturnValue", Kind::Name, 8, nullptr, true}}) &&
+        ExactSpawnerSignature("EnemyManagerSubsystem", "MakeSpawnInfo", 352, kMakeSpawnInfo) &&
+        ExactSpawnerSignature("EnemyManagerSubsystem", "SpawnThreat", 344, kSpawnThreat) &&
+        ExactSpawnerSignature("EnemyCharacter", "HasFinishedSpawnInit", 1, kSpawnInitialized) &&
+        ExactSpawnerSignature("EnemyCharacter", "GetEnemySettings", 16,
+            {{"OutSettings", Kind::Object, 8, "EnemySettings"}, {"ReturnValue", Kind::Bool, 1, nullptr, true}}) &&
+        SpawnField("EnemyTypePtr", Kind::SoftClass, 40) &&
+        SpawnField("SpawnLocation", Kind::Struct, 24, "Vector") && SpawnField("SpawnRotation", Kind::Struct, 24, "Rotator") &&
         Signature(FindClass("Actor"), "K2_GetActorLocation", {{"ReturnValue", Kind::Struct, 24, "Vector", true}}) &&
         Signature(FindClass("Actor"), "GetActorForwardVector", {{"ReturnValue", Kind::Struct, 24, "Vector", true}}) &&
-        Signature(FindClass("Actor"), "K2_GetActorRotation", {{"ReturnValue", Kind::Struct, 24, "Rotator", true}}) &&
-        Signature(FindClass("Actor"), "K2_DestroyActor", {});
+        Signature(FindClass("Actor"), "K2_GetActorRotation", {{"ReturnValue", Kind::Struct, 24, "Rotator", true}});
 }
 
 bool SpawnerRun(Call& call)
@@ -420,6 +470,297 @@ UClass* SelectedEnemyClass(int type)
         actual = actual.empty() ? name : name + "." + actual;
     }
     return actual == path ? cls : nullptr;
+}
+
+bool LiveObject(UObject* object)
+{
+    return object && ObjectAt(Weak(object).index) == object;
+}
+
+// All returned pointers are borrowed only within this game-thread operation. No serial-zero retention.
+UObject* TypedObject(UObject* owner, const char* name, const char* expected)
+{
+    if (!LiveObject(owner)) return nullptr;
+    const Prop p = FindProp(ClassOf(owner), name, true);
+    UObject* target = nullptr;
+    auto* cls = FindClass(expected);
+    if (!p.Is(Kind::Object, 8) || !p.inner || !cls ||
+        !IsChildOf(cls, static_cast<const UClass*>(p.inner)) ||
+        !SafeRead(reinterpret_cast<uint8_t*>(owner) + p.offset, &target, sizeof(target)) ||
+        !LiveObject(target) || IsDefaultObject(target) || !IsA(target, cls)) return nullptr;
+    return target;
+}
+
+UObject* SpawnManager(const SpawnerContext& context)
+{
+    if (*context.Why()) return nullptr;
+    UObject* manager = nullptr;
+    bool ambiguous = false;
+    ForEachInstance(FindClass("EnemyManagerSubsystem"), [&](UObject* object) {
+        if (OuterOf(object) == context.world.Get()) {
+            if (manager) ambiguous = true;
+            manager = object;
+        }
+        return true;
+    });
+    return !ambiguous && !*context.Why() ? manager : nullptr;
+}
+
+bool OwnedEnemies(UObject* manager, const char* name, std::vector<UObject*>& out)
+{
+    out.clear();
+    if (!LiveObject(manager) || IsDefaultObject(manager) || !IsA(manager, FindClass("EnemyManagerSubsystem"))) return false;
+    const Prop p = FindProp(ClassOf(manager), name, true), inner = ArrayInner(p);
+    TArray<UObject*> array{};
+    if (!p.Is(Kind::Array, 16) || !inner.Is(Kind::Object, 8) || !inner.inner ||
+        Name(static_cast<const UObject*>(inner.inner)) != "EnemyCharacter" ||
+        !SafeRead(reinterpret_cast<uint8_t*>(manager) + p.offset, &array, sizeof(array)) ||
+        array.num < 0 || array.max < array.num || array.max > 65536 || (array.num && !array.data)) return false;
+    out.resize(size_t(array.num));
+    if (array.num && !SafeRead(array.data, out.data(), out.size() * sizeof(UObject*))) return false;
+    for (UObject* enemy : out)
+        if (enemy && (!LiveObject(enemy) || IsDefaultObject(enemy) || !IsA(enemy, FindClass("EnemyCharacter")))) return false;
+    return true;
+}
+
+bool EnemyModelReady(UObject* enemy)
+{
+    UObject* mesh = TypedObject(enemy, "Mesh", "SkeletalMeshComponent");
+    if (!mesh) return false;
+    return TypedObject(mesh, "SkinnedAsset", "SkinnedAsset") || TypedObject(mesh, "SkeletalMesh", "SkeletalMesh");
+}
+
+bool EnemyInitialized(UObject* enemy)
+{
+    auto init = SpawnerCall(enemy, "HasFinishedSpawnInit", kSpawnInitialized);
+    return SpawnerRun(init) && init.Out<bool>("ReturnValue");
+}
+
+bool EnemyConfiguration(int type)
+{
+    UClass* selected = SelectedEnemyClass(type);
+    if (!selected) return false;
+    UObject* defaults = Cdo(Name(reinterpret_cast<UObject*>(selected)).c_str());
+    // Inspect the selected Blueprint CDO, not an empty native ancestor. Mesh variant selection
+    // itself belongs to SpawnThreat/Blueprint initialization; do not guess a mesh or subtype.
+    return defaults && IsDefaultObject(defaults) && ClassOf(defaults) == selected &&
+        TypedObject(defaults, "CharacterSettings", "EnemySettings");
+}
+
+using SpawnInfoValue = std::array<uint8_t, 336>;
+struct NativeSpawnSeed {
+    bool attempted = false, valid = false;
+    SpawnInfoValue value{};
+} g_spawnSeed;
+
+bool SpawnSeed(UObject* manager)
+{
+    auto& seed = g_spawnSeed;
+    if (seed.attempted) return seed.valid;
+    seed.attempted = true; // at most ONE native allocation, even if validation/call faults
+    auto builder = SpawnerCall(manager, "MakeSpawnInfo", kMakeSpawnInfo);
+    builder.Arg("SpawnPoint", static_cast<UObject*>(nullptr)).Arg("Spawner", static_cast<UObject*>(nullptr));
+    if (!SpawnerRun(builder)) return false;
+    seed.value = builder.Out<SpawnInfoValue>("ReturnValue");
+    // This immutable process-lifetime seed owns the native allocations. It contains no UObject
+    // refs or mutable world state. SpawnThreat deep-copies it (including all arrays) before
+    // sync initialization/deferred closure capture; temporary dispatch aggregates BORROW it.
+    for (const char* name : {"PatrolPath", "LootDataDynamic", "MeleeLootDataDynamic", "HearingDistanceCurveOverride", "SpecificEnemyData", "OverrideLevel"}) {
+        const Prop p = SpawnField(name, Kind::Object, 8);
+        UObject* value = nullptr;
+        if (!p) return false;
+        memcpy(&value, seed.value.data() + p.offset, 8);
+        if (value) return false;
+    }
+    for (const char* name : {"ActorTags", "TelekinesisObjectData", "SkipTraceSoundTags"}) {
+        const Prop p = SpawnField(name, Kind::Array, 16), inner = ArrayInner(p);
+        if (!p || (strcmp(name, "TelekinesisObjectData") ? !inner.Is(Kind::Name, 8) :
+            (!inner.Is(Kind::Struct, 48) || !inner.inner || Name(static_cast<const UObject*>(inner.inner)) != "EnemyTelekinesisObjectData"))) return false;
+        TArray<uint8_t> a{}; memcpy(&a, seed.value.data() + p.offset, sizeof(a));
+        if (strcmp(name, "SkipTraceSoundTags")) { if (a.num || a.max || a.data) return false; }
+        else {
+            std::array<uint64_t, 2> tags{};
+            if (a.num != 2 || a.max < 2 || a.max > 16 || !a.data || !SafeRead(a.data, tags.data(), sizeof(tags)) ||
+                NameToString(&tags[0]) != "Shooting" || NameToString(&tags[1]) != "CultistHitByMelee") return false;
+        }
+    }
+    const Prop tags = SpawnField("GrantedTags", Kind::Struct, 32, "GameplayTagContainer");
+    if (!tags || std::any_of(seed.value.begin() + tags.offset, seed.value.begin() + tags.offset + 32, [](uint8_t b) { return b != 0; })) return false;
+    const Prop weapon = SpawnField("EnemyWeaponData", Kind::Struct, 16, "DataTableRowHandle");
+    const Prop table = weapon ? FindProp(static_cast<const UClass*>(weapon.inner), "DataTable", true) : Prop{};
+    UObject* dataTable = nullptr;
+    if (!table.Is(Kind::Object, 8) || table.offset > 8) return false;
+    memcpy(&dataTable, seed.value.data() + weapon.offset + table.offset, 8);
+    if (dataTable) return false;
+    const Prop optimized = SpawnField("bOptimizeSpawning", Kind::Bool, 1);
+    if (!optimized || !optimized.boolMask || (seed.value[optimized.offset] & optimized.boolMask)) return false;
+    seed.valid = true;
+    return true;
+}
+
+struct NativeSpawnClass {
+    bool attempted = false, valid = false;
+    std::array<uint8_t, 32> path{};
+    std::array<uint8_t, 40> value{};
+};
+std::array<NativeSpawnClass, spawn::TypeCount> g_spawnClasses;
+
+bool SpawnClass(int type)
+{
+    auto& native = g_spawnClasses[type];
+    if (!native.attempted) {
+        native.attempted = true;
+        const std::string path = spawn::Types[type].path;
+        std::wstring wide(path.begin(), path.end());
+        FString input{wide.data(), int32_t(wide.size() + 1), int32_t(wide.size() + 1)};
+        auto pathCall = SpawnerCall(SpawnerLibrary("KismetSystemLibrary"), "MakeSoftClassPath", kMakeClassPath);
+        pathCall.Arg("PathString", input);
+        if (!SpawnerRun(pathCall)) return false;
+        native.path = pathCall.Out<std::array<uint8_t, 32>>("ReturnValue");
+        auto softCall = SpawnerCall(SpawnerLibrary("KismetSystemLibrary"), "Conv_SoftClassPathToSoftClassRef", kMakeSoftClass);
+        softCall.ArgRaw(0, native.path.data(), native.path.size());
+        if (!SpawnerRun(softCall)) return false;
+        native.value = softCall.Out<std::array<uint8_t, 40>>("ReturnValue");
+        native.valid = true;
+    }
+    if (!native.valid) return false;
+    auto load = SpawnerCall(SpawnerLibrary("KismetSystemLibrary"), "LoadClassAsset_Blocking", kLoadEnemyClass);
+    load.ArgRaw(0, native.value.data(), native.value.size());
+    return SpawnerRun(load) && SelectedEnemyClass(type) &&
+        load.Out<UObject*>("ReturnValue") == reinterpret_cast<UObject*>(SelectedEnemyClass(type));
+}
+
+uint64_t SpawnMarker()
+{
+    // One interned base per DLL session; Unreal parses the numeric suffix into FName's
+    // instance number. Never reuse a number, including failed requests. Stop on exhaustion.
+    static const std::string base = "BananMenuSpawn" + std::to_string(GetCurrentProcessId()) + "T" + std::to_string(GetTickCount64());
+    static uint32_t next = 1;
+    static uint32_t comparisonIndex = 0;
+    static bool unsupported = false;
+    if (unsupported || next >= 2147483647u) return 0;
+    const uint32_t number = next++;
+    const std::string text = base + "_" + std::to_string(number);
+    std::wstring wide(text.begin(), text.end());
+    FString input{wide.data(), int32_t(wide.size() + 1), int32_t(wide.size() + 1)};
+    auto convert = SpawnerCall(SpawnerLibrary("KismetStringLibrary"), "Conv_StringToName",
+        {{"InString", Kind::String, 16}, {"ReturnValue", Kind::Name, 8, nullptr, true}});
+    convert.Arg("InString", input);
+    if (!SpawnerRun(convert)) return 0;
+    const uint64_t value = convert.Out<uint64_t>("ReturnValue");
+    // The supported engine FName ABI is already used by ue::NameToString: comparison
+    // index plus instance number. Verify numeric suffix parsing so repeated requests
+    // cannot silently intern a growing set of distinct base names on another ABI.
+    const auto index = uint32_t(value), instance = uint32_t(value >> 32);
+    if (!value || instance != number + 1 || (comparisonIndex && index != comparisonIndex) || NameToString(&value) != text) {
+        unsupported = true; return 0;
+    }
+    comparisonIndex = index;
+    return value;
+}
+
+// -1 means unsupported/corrupt metadata; duplicated markers also fail closed.
+int HasSpawnMarker(UObject* enemy, uint64_t marker)
+{
+    if (!LiveObject(enemy)) return -1;
+    const Prop tags = FindProp(ClassOf(enemy), "Tags", true);
+    if (!tags.Is(Kind::Array, 16) || !ArrayInner(tags).Is(Kind::Name, 8)) return -1;
+    TArray<uint64_t> array{};
+    if (!SafeRead(reinterpret_cast<uint8_t*>(enemy) + tags.offset, &array, sizeof(array)) ||
+        array.num < 0 || array.max < array.num || array.max > 4096 || (array.num && !array.data)) return -1;
+    std::vector<uint64_t> values(size_t(array.num));
+    if (array.num && !SafeRead(array.data, values.data(), values.size() * 8)) return -1;
+    return int(std::count(values.begin(), values.end(), marker));
+}
+
+const char* SpawnResultMessage(spawn::Result result)
+{
+    switch (result) {
+    case spawn::Result::Success: return "Enemies initialized with models.";
+    case spawn::Result::Transition: return "Level changed; spawning stopped.";
+    case spawn::Result::Timeout: return "Spawn timed out: enemy initialization or model is not ready.";
+    case spawn::Result::Stale: return "Spawn target changed, disappeared or was ambiguous.";
+    case spawn::Result::Pending: return "Waiting for enemy initialization and model...";
+    default: return "Native enemy spawn request failed.";
+    }
+}
+
+void FinishSpawn(const char* message)
+{
+    s.enemySpawnerCreated = g_spawnPending.request.Ready();
+    s.enemySpawnerRequested = g_spawnPending.count;
+    s.enemySpawnerMessage = message;
+    km::Log("Enemy spawner: ready %d of %d; %s", s.enemySpawnerCreated, s.enemySpawnerRequested, message);
+    char status[256];
+    std::snprintf(status, sizeof(status), lang::T("Ready %d of %d enemies. %s"), s.enemySpawnerCreated, s.enemySpawnerRequested, lang::T(message));
+    menu::Toast(status);
+    g_spawnPending = {}; // no retained actor, world or controller after termination
+    g_spawnerBusy = false;
+}
+
+void TickSpawner(uint64_t now)
+{
+    auto& pending = g_spawnPending;
+    if (!pending.request.Pending()) return;
+    if (now - pending.pollAt < 100) return;
+    pending.pollAt = now;
+    std::function<void()> poll = [&] {
+        if (*pending.context.Why()) { pending.request.Poll(false, now); return; }
+        UObject* manager = SpawnManager(pending.context);
+        std::vector<UObject*> alive, dead;
+        if (!OwnedEnemies(manager, "AliveEnemies", alive) || !OwnedEnemies(manager, "DeadEnemies", dead)) { pending.request.Fail(); return; }
+        for (int i = 0; i < pending.count && pending.request.Pending(); ++i) {
+            UObject* match = nullptr;
+            int matches = 0;
+            for (UObject* enemy : alive) {
+                if (!enemy) continue;
+                const int tags = HasSpawnMarker(enemy, pending.markers[i]);
+                if (tags < 0 || tags > 1) { pending.request.Fail(); return; }
+                if (tags) { match = enemy; ++matches; }
+            }
+            for (UObject* enemy : dead) {
+                if (!enemy) continue;
+                const int tags = HasSpawnMarker(enemy, pending.markers[i]);
+                if (tags < 0 || tags > 1) { pending.request.Fail(); return; }
+                if (tags) ++matches; // a dead target can never satisfy readiness
+            }
+            if (matches != 1 || !match) {
+                if (matches || pending.seen[i]) pending.request.Observe(i, {pending.markers[i]}, false, false, false);
+                continue; // not in manager yet: remain pending until deadline
+            }
+            const FreshWorldActor actor(pending.context.world, match, SelectedEnemyClass(pending.type));
+            if (!actor.Get() || (pending.targets[i].obj && pending.targets[i].Get() != match)) {
+                pending.request.Observe(i, {pending.markers[i]}, false, false, false); continue;
+            }
+            pending.seen[i] = true;
+            if (!pending.targets[i].obj) pending.targets[i] = GenerationRef(match); // stays empty for serial-zero actors
+            const bool initialized = EnemyInitialized(actor.Get());
+            // Native getters can dispatch Blueprint events: re-resolve ownership and identity afterward.
+            std::vector<UObject*> current, currentDead;
+            manager = SpawnManager(pending.context);
+            if (*pending.context.Why()) { pending.request.Poll(false, now); return; }
+            bool owned = actor.Get() && OwnedEnemies(manager, "AliveEnemies", current) && OwnedEnemies(manager, "DeadEnemies", currentDead) &&
+                std::count(current.begin(), current.end(), match) == 1 && (!pending.targets[i].obj || pending.targets[i].Get() == match);
+            int markerCount = 0;
+            if (owned) {
+                for (auto* enemy : current) if (enemy) {
+                    const int tags = HasSpawnMarker(enemy, pending.markers[i]);
+                    if (tags < 0) owned = false; else markerCount += tags;
+                }
+                for (auto* enemy : currentDead) if (enemy) {
+                    const int tags = HasSpawnMarker(enemy, pending.markers[i]);
+                    if (tags < 0) owned = false; else markerCount += tags;
+                }
+                owned = owned && markerCount == 1 && HasSpawnMarker(actor.Get(), pending.markers[i]) == 1;
+            }
+            pending.request.Observe(i, {pending.markers[i]}, owned, initialized, owned && EnemyModelReady(actor.Get()));
+        }
+        pending.request.Poll(!*pending.context.Why(), now);
+    };
+    if (!Guard(poll)) pending.request.Fail();
+    s.enemySpawnerCreated = pending.request.Ready();
+    s.enemySpawnerMessage = SpawnResultMessage(pending.request.Result());
+    if (!pending.request.Pending()) FinishSpawn(s.enemySpawnerMessage);
 }
 
 UObject* ItemManager()
@@ -1713,6 +2054,7 @@ void Tick()
     snap.photoWhy = photoCamera.Why();
     snap.photoReady = snap.reflection && snap.photoWhy.empty();
     snap.photoMessage = s.photoMessage;
+    TickSpawner(now);
     const SpawnerContext spawner{GenerationRef(s.pc.Get()), GenerationRef(s.player.Get()),
         GenerationRef(player ? OuterOf(OuterOf(player)) : nullptr)};
     snap.enemySpawnerWhy = spawner.Why();
@@ -1780,106 +2122,83 @@ void SpawnEnemies(int type, int count)
         context = g_spawnerContext;
     }
     RunOnGameThread([context, type, count] {
-        struct BusyReset { ~BusyReset() { g_spawnerBusy = false; } } reset;
-        int created = 0;
-        const char* message = "Enemy creation failed or was blocked.";
+        g_spawnPending = {};
+        g_spawnPending.context = context;
+        g_spawnPending.type = type;
+        g_spawnPending.count = count;
+        s.enemySpawnerCreated = 0;
+        s.enemySpawnerRequested = count;
+        const char* failure = "Native enemy spawn request failed.";
+        bool dispatched = false;
         std::function<void()> work = [&] {
-            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
-            if (!SpawnerAPIs()) { message = "Native enemy spawner API unavailable."; return; }
-            // Opaque returned structs remain alive through the dependent synchronous calls.
-            const std::string path = spawn::Types[type].path;
-            std::wstring wide(path.begin(), path.end());
-            FString input{wide.data(), int32_t(wide.size() + 1), int32_t(wide.size() + 1)};
-            auto makePath = SpawnerCall(SpawnerLibrary("KismetSystemLibrary"), "MakeSoftClassPath", kMakeClassPath);
-            makePath.Arg("PathString", input);
-            if (!SpawnerRun(makePath)) { message = "Enemy class load failed."; return; }
-            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
-            const auto classPath = makePath.Out<std::array<uint8_t, 32>>("ReturnValue");
-            auto makeSoft = SpawnerCall(SpawnerLibrary("KismetSystemLibrary"), "Conv_SoftClassPathToSoftClassRef", kMakeSoftClass);
-            makeSoft.ArgRaw(0, classPath.data(), classPath.size());
-            if (!SpawnerRun(makeSoft)) { message = "Enemy class load failed."; return; }
-            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
-            const auto softClass = makeSoft.Out<std::array<uint8_t, 40>>("ReturnValue");
-            auto load = SpawnerCall(SpawnerLibrary("KismetSystemLibrary"), "LoadClassAsset_Blocking", kLoadEnemyClass);
-            load.ArgRaw(0, softClass.data(), softClass.size());
-            if (!SpawnerRun(load)) { message = "Enemy class load failed."; return; }
-            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
-            UClass* selected = SelectedEnemyClass(type);
-            if (!selected || load.Out<UObject*>("ReturnValue") != reinterpret_cast<UObject*>(selected)) {
-                message = "Enemy class load failed."; return;
+            if (*context.Why()) { failure = "Level changed; spawning stopped."; return; }
+            if (!SpawnerAPIs()) { failure = "Native enemy spawner API unavailable."; return; }
+            if (!SpawnInfoLayout()) { failure = "Native enemy spawner API unavailable."; return; }
+            if (!SpawnClass(type)) { failure = "Enemy class load failed."; return; }
+            if (*context.Why()) { failure = "Level changed; spawning stopped."; return; }
+            if (!EnemyConfiguration(type)) { failure = "Selected enemy Blueprint has no usable EnemySettings configuration."; return; }
+            UObject* manager = SpawnManager(context);
+            std::vector<UObject*> initial;
+            if (!OwnedEnemies(manager, "AliveEnemies", initial) || !OwnedEnemies(manager, "DeadEnemies", initial)) {
+                failure = "Native enemy manager ownership unavailable."; return;
             }
+            if (!SpawnSeed(manager)) { failure = "Native spawn defaults are unsupported; restart after checking the game version."; return; }
+            if (*context.Why()) { failure = "Level changed; spawning stopped."; return; }
             auto position = SpawnerCall(context.player.Get(), "K2_GetActorLocation", {{"ReturnValue", Kind::Struct, 24, "Vector", true}});
-            if (!SpawnerRun(position)) { message = "Player pose unavailable; nothing spawned."; return; }
-            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+            if (!SpawnerRun(position) || *context.Why()) { failure = "Player pose unavailable; nothing spawned."; return; }
             auto forward = SpawnerCall(context.player.Get(), "GetActorForwardVector", {{"ReturnValue", Kind::Struct, 24, "Vector", true}});
-            if (!SpawnerRun(forward)) { message = "Player pose unavailable; nothing spawned."; return; }
-            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+            if (!SpawnerRun(forward) || *context.Why()) { failure = "Player pose unavailable; nothing spawned."; return; }
             auto rotation = SpawnerCall(context.player.Get(), "K2_GetActorRotation", {{"ReturnValue", Kind::Struct, 24, "Rotator", true}});
-            if (!SpawnerRun(rotation)) { message = "Player pose unavailable; nothing spawned."; return; }
-            if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
+            if (!SpawnerRun(rotation) || *context.Why()) { failure = "Player pose unavailable; nothing spawned."; return; }
             std::array<spawn::Point, spawn::MaxCount> positions{};
             const Rot facing = rotation.Out<Rot>("ReturnValue");
             if (!spawn::Finite({facing.pitch, facing.yaw, facing.roll}) ||
                 !spawn::Positions(position.Out<spawn::Point>("ReturnValue"), forward.Out<spawn::Point>("ReturnValue"), count, positions)) {
-                message = "Player pose unavailable; nothing spawned."; return;
+                failure = "Player pose unavailable; nothing spawned."; return;
             }
+            const Prop typeField = SpawnField("EnemyTypePtr", Kind::SoftClass, 40);
+            const Prop atField = SpawnField("SpawnLocation", Kind::Struct, 24, "Vector");
+            const Prop rotField = SpawnField("SpawnRotation", Kind::Struct, 24, "Rotator");
+            const Prop tagsField = SpawnField("ActorTags", Kind::Array, 16);
+            if (!typeField || !atField || !rotField || !tagsField || !ArrayInner(tagsField).Is(Kind::Name, 8)) return;
+            // Every marker is constructed/preflighted before ANY actor dispatch.
             for (int i = 0; i < count; ++i) {
-                if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
-                auto transform = SpawnerCall(SpawnerLibrary("KismetMathLibrary"), "MakeTransform", kMakeSpawnTransform);
-                transform.Arg("Location", positions[i]).Arg("Rotation", Rot{0, facing.yaw, 0}).Arg("Scale", Vec{1, 1, 1});
-                if (!SpawnerRun(transform)) return;
-                if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
-                selected = SelectedEnemyClass(type);
-                if (!selected) { message = "Enemy class load failed."; return; }
-                const auto pose = transform.Out<std::array<uint8_t, 96>>("ReturnValue");
-                auto begin = SpawnerCall(SpawnerLibrary("GameplayStatics"), "BeginDeferredActorSpawnFromClass", kBeginEnemy);
-                begin.Arg("WorldContextObject", context.player.Get()).Arg("ActorClass", selected).Arg("SpawnTransform", pose)
-                    .Arg("CollisionHandlingOverride", uint8_t(3)).Arg("Owner", static_cast<UObject*>(nullptr))
-                    .Arg("TransformScaleMethod", uint8_t(0));
-                const bool began = SpawnerRun(begin);
-                const FreshWorldActor actor(context.world, begin.Out<UObject*>("ReturnValue"), selected);
-                struct DeferredCleanup {
-                    const FreshWorldActor& actor;
-                    bool completed = false;
-                    ~DeferredCleanup() {
-                        if (completed) return;
-                        std::function<void()> cleanup = [&] {
-                            if (UObject* live = actor.Get()) {
-                                auto destroy = SpawnerCall(live, "K2_DestroyActor", {});
-                                if (!SpawnerRun(destroy)) km::Log("Enemy spawner: deferred actor cleanup failed");
-                            }
-                        };
-                        if (!Guard(cleanup)) km::Log("Enemy spawner: deferred actor cleanup faulted");
-                    }
-                } cleanup{actor};
-                if (!began) return;
-                if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
-                if (!actor.Get()) return;
-                auto finish = SpawnerCall(SpawnerLibrary("GameplayStatics"), "FinishSpawningActor", kFinishEnemy);
-                finish.Arg("Actor", actor.Get()).Arg("SpawnTransform", pose).Arg("TransformScaleMethod", uint8_t(0));
-                if (!SpawnerRun(finish)) return;
-                if (*context.Why()) { message = "Level changed; spawning stopped."; return; }
-                UObject* completed = actor.Get();
-                if (!completed || finish.Out<UObject*>("ReturnValue") != completed || !IsA(completed, FindClass("EnemyCharacter"))) {
-                    return;
+                if (*context.Why() || !(g_spawnPending.markers[i] = SpawnMarker())) {
+                    failure = "Spawn correlation unavailable; nothing spawned."; return;
                 }
-                ++created;
-                cleanup.completed = true;
-                const Prop controller = FindProp(ClassOf(completed), "Controller", true);
-                UObject* ai = nullptr;
-                if (controller.Is(Kind::Object, sizeof(UObject*))) SafeRead(reinterpret_cast<uint8_t*>(completed) + controller.offset, &ai, sizeof(ai));
-                km::Log("Enemy spawner: completed %s; Controller %s", Name(reinterpret_cast<UObject*>(ClassOf(completed))).c_str(), ai ? "present" : "absent");
             }
-            message = "Actors created; check enemy behavior in game.";
+            if (!g_spawnPending.request.Begin(true, count, GetTickCount64())) return;
+            for (int i = 0; i < count; ++i)
+                if (!g_spawnPending.request.Bind(i, {g_spawnPending.markers[i]})) return;
+            for (int i = 0; i < count; ++i) {
+                if (*context.Why()) { failure = "Level changed; spawning stopped."; return; }
+                manager = SpawnManager(context);
+                if (!manager || !SelectedEnemyClass(type)) return;
+                SpawnInfoValue info = g_spawnSeed.value; // borrowed native members, NEVER destroyed as an owning struct
+                const Rot heading{0, facing.yaw, 0};
+                memcpy(info.data() + typeField.offset, g_spawnClasses[type].value.data(), 40);
+                memcpy(info.data() + atField.offset, &positions[i], 24);
+                memcpy(info.data() + rotField.offset, &heading, 24);
+                // The validated seed's ActorTags is empty. Preserve it and append our one private
+                // FName. The reflected wrapper deep-copies this stack-backed array before return.
+                uint64_t marker = g_spawnPending.markers[i];
+                const TArray<uint64_t> tags{&marker, 1, 1};
+                memcpy(info.data() + tagsField.offset, &tags, sizeof(tags));
+                auto call = SpawnerCall(manager, "SpawnThreat", kSpawnThreat);
+                call.ArgRaw(0, info.data(), info.size()).Arg("InSpawner", static_cast<UObject*>(nullptr));
+                if (!SpawnerRun(call)) return;
+                km::Log("Enemy spawner: native request %d/%d for %s; awaiting initialization/model", i + 1, count, spawn::Types[type].label);
+            }
+            dispatched = true;
         };
-        if (!Guard(work)) message = "Enemy creation failed or was blocked.";
-        s.enemySpawnerCreated = created;
-        s.enemySpawnerRequested = count;
-        s.enemySpawnerMessage = message;
-        char status[256];
-        std::snprintf(status, sizeof(status), lang::T("Created %d of %d enemies. %s"), created, count, lang::T(message));
-        menu::Toast(status);
-        km::Log("Enemy spawner: created %d of %d; %s", created, count, message);
+        const bool guarded = Guard(work);
+        if (!guarded || !dispatched) {
+            g_spawnPending.request.Fail();
+            FinishSpawn(failure);
+            return;
+        }
+        s.enemySpawnerMessage = "Waiting for enemy initialization and model...";
+        // Completion is polled by Tick; dispatch success and possession count as zero ready.
     });
 }
 
@@ -2166,15 +2485,19 @@ void KillNearby()
         RefreshEnemies(GetTickCount64());
         Vec me = Location(player);
         double radius = g_value[KillRadius] * 100.0;
-        int killed = 0;
+        int killed = 0, skipped = 0;
         ForEachEnemy([&](UObject* e) {
             if (Distance(me, Location(e)) > radius) return;
-            Call c(e, "KillEnemyInstantly");
+            const FreshWorldActor target(GenerationRef(OuterOf(OuterOf(player))), e, ClassOf(e));
+            // KillEnemyInstantly can enable a Genesis execution. Do not offer that route
+            // for an incomplete enemy whose finisher would dereference a missing model.
+            if (!target.Get() || !EnemyInitialized(target.Get()) || !target.Get() || !EnemyModelReady(target.Get())) { ++skipped; return; }
+            Call c(target.Get(), "KillEnemyInstantly");
             if (c && c.Arg(0, false).Arg(1, player).Arg(2, false).Run()) killed++;
         });
-        km::Log("Kill nearby: %d enemies within %.0f m", killed, radius / 100);
-        char text[96];
-        snprintf(text, sizeof(text), lang::T(killed == 1 ? "%d enemy killed" : "%d enemies killed"), killed);
+        km::Log("Kill nearby: %d requests, %d incomplete/model-less enemies skipped within %.0f m", killed, skipped, radius / 100);
+        char text[160];
+        snprintf(text, sizeof(text), lang::T("Kill requested for %d enemies; skipped %d not ready."), killed, skipped);
         menu::Toast(text);
     });
 }

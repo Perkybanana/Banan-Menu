@@ -46,7 +46,7 @@ template <class F> void ForEachInstance(const UClass* cls, F&& f) // live gamepl
 }
 
 struct Prop {
-    enum class Kind { Unknown, Float, Double, Struct, Object, Int, Class, SoftClass, String, Enum };
+    enum class Kind { Unknown, Float, Double, Struct, Object, Int, Class, SoftClass, String, Enum, Bool, Array, Name };
     int32_t offset = -1;
     uint8_t boolMask = 0;       // non-zero for bool properties (bitfields included)
     const void* inner = nullptr; // struct properties: the UScriptStruct; object properties: the class
@@ -59,6 +59,7 @@ struct Prop {
 };
 // New transient camera paths opt out of legacy caches; default callers keep their existing behavior.
 Prop FindProp(const UClass* structOrClass, const char* name, bool uncached = false); // walks the Super chain
+Prop ArrayInner(const Prop& array); // actual inner FProperty; weak references remain Unknown
 int32_t StructSize(const UClass* structOrClass);               // bytes of one instance
 UFunction* FindFunction(const UClass* cls, const char* name, bool uncached = false);
 
