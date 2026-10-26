@@ -1,6 +1,6 @@
 <p align="center"><img src="https://raw.githubusercontent.com/Perkybanana/Banan-Menu/development/assets/banan-hero.svg" alt="Banan Menu — Hellraiser: Revival. Insert / F8." width="100%"></p>
 <h1 align="center">Banan Menu</h1>
-<p align="center">An in-game menu for <b>Clive Barker’s Hellraiser: Revival</b> on Windows.<br>Player controls, inventory tools, photo tools, chapter selection and enemy spawning.</p>
+<p align="center">Banan’s expanded version of <a href="https://github.com/literalynn/Hellraiser-Revivals-Ketamine-Menu"><b>Hellraiser Revival’s Ketamine Menu</b></a> by <a href="https://github.com/literalynn">literalynn</a>.<br>An in-game mod menu for <b>Clive Barker’s Hellraiser: Revival</b> on Windows.</p>
 <p align="center"><b>English</b> · <a href="README.ru.md">Русский</a></p>
 <p align="center">
 <a href="https://github.com/Perkybanana/Banan-Menu/releases/latest"><img src="https://img.shields.io/github/v/release/Perkybanana/Banan-Menu?label=latest%20stable&amp;color=ac6ee2" alt="Latest published stable release"></a>
@@ -9,9 +9,27 @@
 <img src="https://img.shields.io/badge/platform-Windows%20x64-262631" alt="Windows x64">
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-ac6ee2" alt="MIT license"></a>
 </p>
-<p align="center"><a href="#installation">Installation</a> · <a href="#features">Features</a> · <a href="#usage">Usage</a> · <a href="#screenshots">Screenshots</a> · <a href="#faq">FAQ</a> · <a href="#uninstall">Uninstall</a> · <a href="#build">Build</a></p>
+<p align="center"><a href="#what-banan-menu-adds">What’s new vs. the original</a> · <a href="#installation">Installation</a> · <a href="#features">Features</a> · <a href="#usage">Usage</a> · <a href="#screenshots">Screenshots</a> · <a href="#faq">FAQ</a> · <a href="#uninstall">Uninstall</a> · <a href="#build">Build</a></p>
 
 **Press Insert or F8 to open the menu.** Source version: **1.0.0**. [Downloads and release notes](https://github.com/Perkybanana/Banan-Menu/releases) identify the builds actually published; the badge tracks the latest published stable release.
+
+## What Banan Menu adds
+
+**Ketamine Menu by literalynn is the foundation of this project.** Its overlay, engine integration and core trainer features are retained and extended here by Banan. The comparison below is against **Ketamine Menu 0.4.12**, [commit `3b4ba3e`](https://github.com/literalynn/Hellraiser-Revivals-Ketamine-Menu/tree/3b4ba3efc7ecc8c01f2d59b67ff64e4c3fda642f), the source version used for this project. Later upstream releases may differ.
+
+| Feature | In the original base | Added in Banan Menu 1.0.0 |
+| --- | --- | --- |
+| Crafting resources | Materials can be given through the general item browser. | A dedicated editor sets the exact carried total of each of six materials, from 0 to 9999. |
+| Favorites & item kits | Browse and give individual items. | Save favorite items and named kits with chosen quantities, then give a kit on request. Both persist between sessions. |
+| Settings profiles | The current configuration is saved automatically. | Save and apply multiple named profiles of menu settings. |
+| Camera bookmarks | Free camera, FOV and HUD controls; three saved **player** positions. | Three separate **camera** views save position, rotation and FOV settings for the current session. Restoring on another map is blocked. |
+| Chapter selection | No chapter selector in the mod menu. | A mission-selection button in the game’s main menu opens the native chapter list. The button returns after leaving a chapter. |
+| Steam achievements | No achievement controls in the mod menu. | Check achievement status and request unlocking all remaining game achievements, with an explicit confirmation. |
+| Enemy spawning | Freeze enemies or kill nearby enemies. | Spawn Hellghoul, Exploding Hellghoul, Cambion, Cultist or Runner in requested groups of 1–5, with native model and combat initialization. Fresh Cambions use their final combat phase. |
+
+**Inherited from Ketamine Menu:** god mode and health controls, ammunition and durability cheats, Genesis power controls, silent aim, fly/noclip, speed/jump controls, free camera, ESP, money/item delivery, weapon skins and charms, time scale, enemy freeze/kill, FOV/HUD controls, auto lockpick, startup skipping, objective/shop controls, localization and hotkeys. Credit for these original features belongs to the upstream project.
+
+The [full feature list](#features) below includes both inherited features and Banan’s additions. Runtime limits and the scope of testing are recorded in [verification](docs/VERIFICATION.md). The original [MIT license](LICENSE) and copyright notices are preserved.
 
 ## Installation
 
@@ -86,6 +104,6 @@ The [Windows workflow](https://github.com/Perkybanana/Banan-Menu/actions/workflo
 
 ## Credits & licenses
 
-Based on [Ketamine Menu](https://github.com/literalynn/Hellraiser-Revivals-Ketamine-Menu), upstream commit `3b4ba3efc7ecc8c01f2d59b67ff64e4c3fda642f`. Upstream copyright and the [MIT license](LICENSE) are preserved. See [third-party notices](THIRD-PARTY-NOTICES.txt) and the [Inter font license](assets/fonts/Inter-OFL.txt), all included in the binary archive.
+Original mod and core implementation: [Hellraiser Revival’s Ketamine Menu](https://github.com/literalynn/Hellraiser-Revivals-Ketamine-Menu) by [literalynn](https://github.com/literalynn), version 0.4.12, commit `3b4ba3efc7ecc8c01f2d59b67ff64e4c3fda642f`. Banan Menu additions and maintenance: [Banan / Perkybanana](https://github.com/Perkybanana). See [what Banan Menu adds](#what-banan-menu-adds) for the feature comparison. Upstream copyright and the [MIT license](LICENSE) are preserved. See [third-party notices](THIRD-PARTY-NOTICES.txt) and the [Inter font license](assets/fonts/Inter-OFL.txt), all included in the binary archive.
 
 [Changelog](CHANGELOG.md) · [Verification](docs/VERIFICATION.md) · [Issues](https://github.com/Perkybanana/Banan-Menu/issues)

@@ -1,6 +1,6 @@
 <p align="center"><img src="https://raw.githubusercontent.com/Perkybanana/Banan-Menu/development/assets/banan-hero.svg" alt="Banan Menu — Hellraiser: Revival. Insert / F8." width="100%"></p>
 <h1 align="center">Banan Menu</h1>
-<p align="center">Внутриигровое меню для <b>Clive Barker’s Hellraiser: Revival</b> на Windows.<br>Управление игроком, инвентарь, фотосъёмка, выбор глав и создание врагов.</p>
+<p align="center">Расширенная версия <a href="https://github.com/literalynn/Hellraiser-Revivals-Ketamine-Menu"><b>Hellraiser Revival’s Ketamine Menu</b></a> от <a href="https://github.com/literalynn">literalynn</a>, развиваемая Banan.<br>Внутриигровое мод-меню для <b>Clive Barker’s Hellraiser: Revival</b> на Windows.</p>
 <p align="center"><a href="README.md">English</a> · <b>Русский</b></p>
 <p align="center">
 <a href="https://github.com/Perkybanana/Banan-Menu/releases/latest"><img src="https://img.shields.io/github/v/release/Perkybanana/Banan-Menu?label=latest%20stable&amp;color=ac6ee2" alt="Последний опубликованный стабильный релиз"></a>
@@ -9,9 +9,27 @@
 <img src="https://img.shields.io/badge/platform-Windows%20x64-262631" alt="Windows x64">
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-ac6ee2" alt="Лицензия MIT"></a>
 </p>
-<p align="center"><a href="#установка">Установка</a> · <a href="#возможности">Возможности</a> · <a href="#использование">Использование</a> · <a href="#скриншоты">Скриншоты</a> · <a href="#частые-вопросы">Вопросы</a> · <a href="#удаление">Удаление</a> · <a href="#сборка">Сборка</a></p>
+<p align="center"><a href="#что-добавлено-в-banan-menu">Отличия от оригинала</a> · <a href="#установка">Установка</a> · <a href="#возможности">Возможности</a> · <a href="#использование">Использование</a> · <a href="#скриншоты">Скриншоты</a> · <a href="#частые-вопросы">Вопросы</a> · <a href="#удаление">Удаление</a> · <a href="#сборка">Сборка</a></p>
 
 **Insert или F8 открывает меню.** Версия исходников: **1.0.0**. В [загрузках и примечаниях к релизам](https://github.com/Perkybanana/Banan-Menu/releases) указаны фактически опубликованные сборки; значок отслеживает последний опубликованный стабильный релиз.
+
+## Что добавлено в Banan Menu
+
+**Основа проекта — Ketamine Menu от literalynn.** Banan Menu сохраняет и расширяет его оверлей, взаимодействие с движком и основные функции трейнера. Ниже приведено сравнение с **Ketamine Menu 0.4.12**, [коммит `3b4ba3e`](https://github.com/literalynn/Hellraiser-Revivals-Ketamine-Menu/tree/3b4ba3efc7ecc8c01f2d59b67ff64e4c3fda642f), на котором основан этот проект. Более поздние версии оригинала могут отличаться.
+
+| Функция | В исходной версии | Добавлено в Banan Menu 1.0.0 |
+| --- | --- | --- |
+| Материалы для крафта | Выдача материалов через общий каталог предметов. | Отдельный редактор точного количества каждого из шести материалов в переносимом инвентаре: от 0 до 9999. |
+| Избранное и наборы предметов | Поиск и выдача отдельных предметов. | Избранные предметы и именованные наборы с заданным количеством каждого предмета; набор выдаётся по нажатию. Сохраняются между сеансами. |
+| Профили настроек | Автоматическое сохранение текущей конфигурации. | Сохранение и применение нескольких именованных профилей настроек меню. |
+| Закладки камеры | Свободная камера, FOV, скрытие HUD и три сохранённые позиции **игрока**. | Три отдельные закладки **камеры**: положение, поворот и настройки FOV на время текущего сеанса. Восстановление на другой карте заблокировано. |
+| Выбор глав | В мод-меню нет выбора глав. | Кнопка выбора миссии в главном меню игры открывает штатный список глав. Кнопка возвращается после выхода из главы. |
+| Достижения Steam | В мод-меню нет управления достижениями. | Проверка статуса достижений и разблокировка всех оставшихся достижений игры с отдельным подтверждением. |
+| Создание врагов | Заморозка врагов и убийство ближайших. | Создание Hellghoul, Exploding Hellghoul, Cambion, Cultist или Runner группами по 1–5 со штатной инициализацией моделей и боевых способностей. Новые Камбионы используют финальную боевую фазу. |
+
+**Унаследовано от Ketamine Menu:** бессмертие и управление здоровьем, боеприпасами и прочностью, управление силами Генезиса, silent aim, полёт/noclip, скорость и прыжок, свободная камера, ESP, выдача денег и предметов, скины и брелоки оружия, скорость времени, заморозка и убийство врагов, FOV/HUD, автоматический взлом замков, пропуск вступительных экранов, управление задачами и магазином, локализация и горячие клавиши. Авторство этих исходных функций принадлежит оригинальному проекту.
+
+В [общем списке возможностей](#возможности) ниже перечислены и унаследованные функции, и дополнения Banan. Ограничения и объём тестирования описаны в [результатах проверки](docs/VERIFICATION.md). Исходная [лицензия MIT](LICENSE) и уведомления об авторских правах сохранены.
 
 ## Установка
 
@@ -86,6 +104,6 @@ powershell -NoProfile -File scripts/package.ps1 -BuildDirectory build -OutputDir
 
 ## Благодарности и лицензии
 
-Основано на [Ketamine Menu](https://github.com/literalynn/Hellraiser-Revivals-Ketamine-Menu), коммит `3b4ba3efc7ecc8c01f2d59b67ff64e4c3fda642f`. Авторские права upstream и [лицензия MIT](LICENSE) сохранены. См. [уведомления о зависимостях](THIRD-PARTY-NOTICES.txt) и [лицензию шрифта Inter](assets/fonts/Inter-OFL.txt), включённые в архив.
+Оригинальное меню и основная реализация: [Hellraiser Revival’s Ketamine Menu](https://github.com/literalynn/Hellraiser-Revivals-Ketamine-Menu) от [literalynn](https://github.com/literalynn), версия 0.4.12, коммит `3b4ba3efc7ecc8c01f2d59b67ff64e4c3fda642f`. Дополнения и развитие Banan Menu: [Banan / Perkybanana](https://github.com/Perkybanana). Сравнение функций — в разделе [«Что добавлено в Banan Menu»](#что-добавлено-в-banan-menu). Авторские права оригинального проекта и [лицензия MIT](LICENSE) сохранены. См. [уведомления о зависимостях](THIRD-PARTY-NOTICES.txt) и [лицензию шрифта Inter](assets/fonts/Inter-OFL.txt), включённые в архив.
 
 [История изменений](CHANGELOG.md) · [Проверка](docs/VERIFICATION.md) · [Проблемы](https://github.com/Perkybanana/Banan-Menu/issues)
