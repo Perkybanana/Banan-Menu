@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 project(BananMenu VERSION 1.0.0 LANGUAGES C CXX ASM_MASM)
-set(BANAN_VERSION "1.0.0-dev.6")
+set(BANAN_VERSION "1.0.0-dev.7")
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

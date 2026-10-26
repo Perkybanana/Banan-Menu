@@ -9,6 +9,7 @@
 #include "menu.h"
 #include "text.h"
 #include "ue.h"
+#include "spawn_ue.h"
 
 #include <windows.h>
 
@@ -547,10 +548,11 @@ bool EnemyConfiguration(int type)
         TypedObject(defaults, "CharacterSettings", "EnemySettings");
 }
 
-using SpawnInfoValue = std::array<uint8_t, 336>;
+using SpawnInfoValue = spawn::SpawnInfoValue;
 struct NativeSpawnSeed {
     bool attempted = false, valid = false;
     SpawnInfoValue value{};
+    const char* stage = "native builder", *field = "MakeSpawnInfo";
 } g_spawnSeed;
 
 bool SpawnSeed(UObject* manager)
@@ -561,22 +563,33 @@ bool SpawnSeed(UObject* manager)
     auto builder = SpawnerCall(manager, "MakeSpawnInfo", kMakeSpawnInfo);
     builder.Arg("SpawnPoint", static_cast<UObject*>(nullptr)).Arg("Spawner", static_cast<UObject*>(nullptr));
     if (!SpawnerRun(builder)) return false;
+    seed.stage = "return copy"; seed.field = "ReturnValue";
     seed.value = builder.Out<SpawnInfoValue>("ReturnValue");
-    // This immutable process-lifetime seed owns the native allocations. It contains no UObject
+    const auto* fn = reinterpret_cast<UClass*>(FindFunction(FindClass("EnemyManagerSubsystem"), "MakeSpawnInfo", true));
+    const Prop result = FindProp(fn, "ReturnValue", true);
+    if (!result.Is(Kind::Struct, 336)) return false;
+    seed.stage = "preparation metadata";
+    if (!spawn::PrepareSeed(seed.value, static_cast<const UClass*>(result.inner), seed.field)) return false;
+    // After preparation/validation this immutable process-lifetime seed owns the native
+    // allocations. It contains no UObject
     // refs or mutable world state. SpawnThreat deep-copies it (including all arrays) before
     // sync initialization/deferred closure capture; temporary dispatch aggregates BORROW it.
     for (const char* name : {"PatrolPath", "LootDataDynamic", "MeleeLootDataDynamic", "HearingDistanceCurveOverride", "SpecificEnemyData", "OverrideLevel"}) {
+        seed.stage = "object metadata"; seed.field = name;
         const Prop p = SpawnField(name, Kind::Object, 8);
         UObject* value = nullptr;
         if (!p) return false;
+        seed.stage = "expected null object";
         memcpy(&value, seed.value.data() + p.offset, 8);
         if (value) return false;
     }
     for (const char* name : {"ActorTags", "TelekinesisObjectData", "SkipTraceSoundTags"}) {
+        seed.stage = "array metadata"; seed.field = name;
         const Prop p = SpawnField(name, Kind::Array, 16), inner = ArrayInner(p);
         if (!p || (strcmp(name, "TelekinesisObjectData") ? !inner.Is(Kind::Name, 8) :
             (!inner.Is(Kind::Struct, 48) || !inner.inner || Name(static_cast<const UObject*>(inner.inner)) != "EnemyTelekinesisObjectData"))) return false;
         TArray<uint8_t> a{}; memcpy(&a, seed.value.data() + p.offset, sizeof(a));
+        seed.stage = "expected native array contents";
         if (strcmp(name, "SkipTraceSoundTags")) { if (a.num || a.max || a.data) return false; }
         else {
             std::array<uint64_t, 2> tags{};
@@ -584,16 +597,26 @@ bool SpawnSeed(UObject* manager)
                 NameToString(&tags[0]) != "Shooting" || NameToString(&tags[1]) != "CultistHitByMelee") return false;
         }
     }
+    seed.stage = "tag-container metadata"; seed.field = "GrantedTags";
     const Prop tags = SpawnField("GrantedTags", Kind::Struct, 32, "GameplayTagContainer");
-    if (!tags || std::any_of(seed.value.begin() + tags.offset, seed.value.begin() + tags.offset + 32, [](uint8_t b) { return b != 0; })) return false;
+    if (!tags) return false;
+    seed.stage = "expected empty tag container";
+    if (std::any_of(seed.value.begin() + tags.offset, seed.value.begin() + tags.offset + 32, [](uint8_t b) { return b != 0; })) return false;
+    seed.stage = "row-handle metadata"; seed.field = "EnemyWeaponData";
     const Prop weapon = SpawnField("EnemyWeaponData", Kind::Struct, 16, "DataTableRowHandle");
-    const Prop table = weapon ? FindProp(static_cast<const UClass*>(weapon.inner), "DataTable", true) : Prop{};
+    if (!weapon) return false;
+    seed.stage = "object metadata"; seed.field = "EnemyWeaponData.DataTable";
+    const Prop table = FindProp(static_cast<const UClass*>(weapon.inner), "DataTable", true);
     UObject* dataTable = nullptr;
     if (!table.Is(Kind::Object, 8) || table.offset > 8) return false;
+    seed.stage = "expected null object";
     memcpy(&dataTable, seed.value.data() + weapon.offset + table.offset, 8);
     if (dataTable) return false;
+    seed.stage = "bool metadata"; seed.field = "bOptimizeSpawning";
     const Prop optimized = SpawnField("bOptimizeSpawning", Kind::Bool, 1);
-    if (!optimized || !optimized.boolMask || (seed.value[optimized.offset] & optimized.boolMask)) return false;
+    if (!optimized || !optimized.boolMask) return false;
+    seed.stage = "expected disabled optimization";
+    if (seed.value[optimized.offset] & optimized.boolMask) return false;
     seed.valid = true;
     return true;
 }
@@ -2142,6 +2165,7 @@ void SpawnEnemies(int type, int count)
         s.enemySpawnerRequested = count;
         const char* failure = "Native enemy spawn request failed.";
         bool dispatched = false;
+        bool preparingSeed = false;
         std::function<void()> work = [&] {
             if (*context.Why()) { failure = "Level changed; spawning stopped."; return; }
             if (!SpawnerAPIs()) { failure = "Native enemy spawner API unavailable."; return; }
@@ -2154,7 +2178,11 @@ void SpawnEnemies(int type, int count)
             if (!OwnedEnemies(manager, "AliveEnemies", initial) || !OwnedEnemies(manager, "DeadEnemies", initial)) {
                 failure = "Native enemy manager ownership unavailable."; return;
             }
-            if (!SpawnSeed(manager)) { failure = "Native spawn defaults are unsupported; restart after checking the game version."; return; }
+            preparingSeed = true;
+            failure = "Native spawn defaults validation failed; see the log for the field and stage.";
+            if (!SpawnSeed(manager)) return;
+            preparingSeed = false;
+            failure = "Native enemy spawn request failed.";
             if (*context.Why()) { failure = "Level changed; spawning stopped."; return; }
             auto position = SpawnerCall(context.player.Get(), "K2_GetActorLocation", {{"ReturnValue", Kind::Struct, 24, "Vector", true}});
             if (!SpawnerRun(position) || *context.Why()) { failure = "Player pose unavailable; nothing spawned."; return; }
@@ -2205,6 +2233,11 @@ void SpawnEnemies(int type, int count)
         };
         const bool guarded = Guard(work);
         if (!guarded || !dispatched) {
+            // Explicit requests only, including cached failures and guarded faults. No addresses
+            // or incoming values are logged, and no failed seed is allocated again.
+            if (preparingSeed)
+                km::Log("Enemy spawner: native defaults rejected; field=%s; stage=%s%s",
+                    g_spawnSeed.field, g_spawnSeed.stage, guarded ? "" : " (guarded fault)");
             g_spawnPending.request.Fail();
             FinishSpawn(failure);
             return;

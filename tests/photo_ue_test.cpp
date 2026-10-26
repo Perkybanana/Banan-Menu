@@ -1,5 +1,6 @@
 // Exercise production reflection/generation checks without loading a game.
 #include "../src/ue.cpp"
+#include "../src/spawn_ue.h"
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -316,5 +317,65 @@ int main() {
         "ordinary enum still resolves UEnum at 0x78 rather than underlying property at 0x70");
     Put(signatureFunction, 0x50, static_cast<ue::UObject*>(nullptr)); Put(signatureFunction, 0x58, int32_t(0));
     Check(ue::Signature(expectedEnemy, "SpawnTest", {}), "exact no-argument cleanup signature accepted");
+    // Synthetic reflection layout, independent of the production decoder constants.
+    // The value offsets deliberately differ from the game's layout.
+    std::array<uint8_t, 0x160> seedStruct{}, hearingField{}, hearingType{}, curveClass{};
+    auto* seedType = reinterpret_cast<ue::UClass*>(seedStruct.data());
+    Put(seedStruct.data(), 0x18, NameId("SpawnInfo"));
+    Put(seedStruct.data(), 0x58, int32_t(336));
+    Put(seedStruct.data(), 0x50, hearingField.data());
+    Put(hearingField.data(), 8, hearingType.data());
+    Put(hearingField.data(), 0x20, NameId("HearingDistanceCurveOverride"));
+    Put(hearingField.data(), 0x30, int32_t(1));
+    Put(hearingField.data(), 0x34, int32_t(8));
+    Put(hearingField.data(), 0x70, curveClass.data());
+    Put(hearingType.data(), 0, NameId("ObjectProperty"));
+    Put(curveClass.data(), 0x18, NameId("CurveFloat"));
+    const char* preparationField = nullptr;
+    for (int offset : {0, 24, 328}) {
+        Put(hearingField.data(), 0x44, int32_t(offset));
+        for (uint64_t incoming : {uint64_t(1), UINT64_MAX, uint64_t(0)}) {
+            spawn::SpawnInfoValue seed;
+            seed.fill(0xA5);
+            Put(seed.data(), size_t(offset), incoming);
+            auto expected = seed;
+            Put(expected.data(), size_t(offset), uint64_t(0));
+            Check(spawn::PrepareSeed(seed, seedType, preparationField), "prepare optional hearing override with indeterminate input");
+            Check(seed == expected, "only reflected hearing field becomes null without reading incoming pointer");
+        }
+    }
+    spawn::SpawnInfoValue rejected;
+    rejected.fill(0xA5);
+    const auto unchanged = rejected;
+    auto rejectsUnchanged = [&] {
+        Check(!spawn::PrepareSeed(rejected, seedType, preparationField) && rejected == unchanged,
+            "incompatible hearing metadata rejects without changing any seed byte");
+    };
+    for (int offset : {-1, 329, 336, INT32_MAX}) {
+        Put(hearingField.data(), 0x44, int32_t(offset)); rejectsUnchanged();
+    }
+    Put(hearingField.data(), 0x44, int32_t(24));
+    for (const char* kind : {"WeakObjectProperty", "StructProperty", "FloatProperty"}) {
+        Put(hearingType.data(), 0, NameId(kind)); rejectsUnchanged();
+    }
+    Put(hearingType.data(), 0, NameId("ObjectProperty"));
+    for (int size : {0, 4, 16}) { Put(hearingField.data(), 0x34, int32_t(size)); rejectsUnchanged(); }
+    Put(hearingField.data(), 0x34, int32_t(8));
+    for (int dim : {0, 2}) { Put(hearingField.data(), 0x30, int32_t(dim)); rejectsUnchanged(); }
+    Put(hearingField.data(), 0x30, int32_t(1));
+    Put(curveClass.data(), 0x18, NameId("OtherCurve")); rejectsUnchanged();
+    Put(curveClass.data(), 0x18, NameId("CurveFloat"));
+    Put(hearingField.data(), 0x70, static_cast<void*>(nullptr)); rejectsUnchanged();
+    Put(hearingField.data(), 0x70, curveClass.data());
+    Put(hearingField.data(), 0x20, NameId("OtherField")); rejectsUnchanged();
+    Check(!strcmp(preparationField, "HearingDistanceCurveOverride"), "diagnostic identifies the missing override field");
+    Put(hearingField.data(), 0x20, NameId("HearingDistanceCurveOverride"));
+    Put(seedStruct.data(), 0x50, static_cast<void*>(nullptr)); rejectsUnchanged();
+    Put(seedStruct.data(), 0x50, hearingField.data());
+    for (int size : {0, 335, 337}) { Put(seedStruct.data(), 0x58, int32_t(size)); rejectsUnchanged(); }
+    Put(seedStruct.data(), 0x58, int32_t(336));
+    Put(seedStruct.data(), 0x18, NameId("OtherStruct")); rejectsUnchanged();
+    Check(!strcmp(preparationField, "ReturnValue.SpawnInfo"), "diagnostic identifies incompatible aggregate metadata");
+    Check(!spawn::PrepareSeed(rejected, nullptr, preparationField) && rejected == unchanged, "missing seed struct rejects without writes");
     puts("Photo/spawn reflection and object-generation tests passed");
 }

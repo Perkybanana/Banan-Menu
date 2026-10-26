@@ -53,7 +53,7 @@ const char* const kTable[][Count] = {
     {"Native enemy spawn request failed.", nullptr, nullptr, nullptr, "Не удалось выполнить штатный запрос создания врага.", nullptr, nullptr, nullptr, nullptr},
     {"Selected enemy Blueprint has no usable EnemySettings configuration.", nullptr, nullptr, nullptr, "У выбранного типа врага нет подходящих настроек EnemySettings.", nullptr, nullptr, nullptr, nullptr},
     {"Native enemy manager ownership unavailable.", nullptr, nullptr, nullptr, "Не удалось проверить принадлежность врагов штатному менеджеру.", nullptr, nullptr, nullptr, nullptr},
-    {"Native spawn defaults are unsupported; restart after checking the game version.", nullptr, nullptr, nullptr, "Штатные параметры создания не поддерживаются. Проверь версию игры и перезапусти её.", nullptr, nullptr, nullptr, nullptr},
+    {"Native spawn defaults validation failed; see the log for the field and stage.", nullptr, nullptr, nullptr, "Проверка штатных параметров создания не пройдена. Поле и этап указаны в журнале.", nullptr, nullptr, nullptr, nullptr},
     {"Spawn correlation unavailable; nothing spawned.", nullptr, nullptr, nullptr, "Не удалось создать метку запроса. Враги не созданы.", nullptr, nullptr, nullptr, nullptr},
     {"Kill requested for %d enemies; skipped %d not ready.", nullptr, nullptr, nullptr, "Запрошено убийство врагов: %d. Пропущено неготовых: %d.", nullptr, nullptr, nullptr, nullptr},
     {"CAMERA BOOKMARKS", nullptr, nullptr, nullptr, "ЗАКЛАДКИ КАМЕРЫ", nullptr, nullptr, nullptr, nullptr},

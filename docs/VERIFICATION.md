@@ -1,6 +1,6 @@
 # Development verification scope
 
-This records the scope of 1.0.0-dev.6 development work as of 2026-10-26. It is not stable-release acceptance.
+This records the scope of 1.0.0-dev.7 development work as of 2026-10-26. It is not stable-release acceptance.
 
 | Area | Evidence and limits |
 | --- | --- |
@@ -12,6 +12,7 @@ This records the scope of 1.0.0-dev.6 development work as of 2026-10-26. It is n
 | Dev.4 five-type enemy spawner | Failed gameplay acceptance: Hellghoul and Cultist were invisible/inert despite Controllers. Backstab worked; Genesis execution after Kill nearby crashed. Captured fault dereferenced a null skinned asset. Bare actor construction bypassed game-specific initialization. Replaced in dev.5. |
 | Dev.5 manager initialization | Uses reflected native MakeSpawnInfo/SpawnThreat, selected Blueprint settings preflight, bounded retained native default seed and private actor-tag correlation. Asynchronous status requires native finished-init getter and typed usable model; 15-second timeout, transition/stale/ambiguous failure and duplicate blocking. Kill nearby skips incomplete/model-less targets. Offline tests/build do not execute Unreal. Visibility/AI, all five types, counts 1 and 5, blocked/partial/asynchronous outcomes, transitions, RU/EN and Genesis behavior remain pending user-controlled gameplay acceptance; no universal crash-prevention claim. |
 | Dev.6 array metadata correction | Dev.5 failed the Chapter5 Hellghoul/count-1 attempt at manager ownership preflight, before SpawnThreat dispatch. Class/settings loading precedes that check. Dev.6 corrects reflected array-element decoding, with production-path regressions for strong object, name and struct arrays and unchanged ordinary object/struct/enum behavior. Native initialization, visibility/AI and Genesis acceptance remain pending. |
+| Dev.7 optional hearing override | Dev.6 Chapter5 attempts passed ownership checks but stopped at native-default validation before SpawnThreat. Read-only evidence found an uninitialized optional hearing-curve pointer in the native builder's null-input return; the native consumer treats null as no override. The owned seed now explicitly selects null only after reflected ObjectProperty/CurveFloat, scalar size, aggregate and bounds checks. Other defaults and lifecycle guards remain strict. Production preparation tests cover invalid incoming words, exact isolated write and unchanged bytes on rejected metadata; failures retain field/stage diagnostics across explicit attempts. Native spawn, visibility/AI and Genesis acceptance remain pending. |
 | Live-checkpoint teleport | Moves to an existing loaded checkpoint; not a complete story-state start. |
 | Arbitrary checkpoint starts | Outside current scope by owner decision on 2026-10-25; no independent story-state pack/loader is planned. Native episode/chapter selection is retained. |
 | Recoil, attack speed, hand visibility | Removed from the current work scope by owner decision on 2026-10-25. |

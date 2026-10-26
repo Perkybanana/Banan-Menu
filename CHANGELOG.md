@@ -1,5 +1,10 @@
 # Changes
 
+## 1.0.0-dev.7 — development candidate, 2026-10-26
+
+- Dev.6 passed ownership preflight but failed native-default validation before spawn dispatch. The null-input native builder left the optional hearing-curve override uninitialized. Free-spawn requests now explicitly select no override in the owned seed after reflected type, class, shape and bounds checks; all other native-default and lifecycle guards remain.
+- Added production preparation regressions and retained field/stage diagnostics for failed cached defaults. Removed unsupported version/restart advice. Native spawning, visibility, AI and Genesis behavior remain pending gameplay acceptance.
+
 ## 1.0.0-dev.6 — development candidate, 2026-10-26
 
 - Corrected reflected array-element metadata decoding after dev.5 rejected enemy-manager ownership before native spawn dispatch. The same fix serves manager enemy arrays, correlation tags and native spawn defaults; existing ownership, readiness and deadline guards remain in place.
