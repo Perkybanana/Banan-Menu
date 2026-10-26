@@ -1,5 +1,10 @@
 # Changes
 
+## 1.0.0-dev.6 — development candidate, 2026-10-26
+
+- Corrected reflected array-element metadata decoding after dev.5 rejected enemy-manager ownership before native spawn dispatch. The same fix serves manager enemy arrays, correlation tags and native spawn defaults; existing ownership, readiness and deadline guards remain in place.
+- Added production reflection regressions for the supported array layout and preserved object/struct/enum decoding. Actual enemy spawning, visibility, AI and Genesis behavior still require gameplay acceptance.
+
 ## 1.0.0-dev.5 — development candidate, 2026-10-26
 
 - Replaced dev.4 bare actor construction after runtime failure: spawned Hellghoul/Cultist were invisible and inert; Genesis after Kill nearby crashed with a null skinned asset. The candidate now requests full native enemy-manager initialization from engine-built defaults, with selected Blueprint settings preflight.

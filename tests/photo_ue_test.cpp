@@ -266,14 +266,54 @@ int main() {
     Check(ue::Signature(expectedEnemy, "SpawnTest", {{"Count", Kind::Bool, 1}}), "native readiness boolean signature accepted");
     Put(parameter, 0x70, uint32_t(0));
     Check(!ue::Signature(expectedEnemy, "SpawnTest", {{"Count", Kind::Bool, 1}}), "invalid boolean mask rejected");
-    Put(parameterType, 0, NameId("ArrayProperty")); Put(parameter, 0x34, int32_t(16)); Put(parameter, 0x70, overlapping);
+    // Real FArrayProperty layout: 0x70 is not Inner. Exercise FindProp as well as
+    // ArrayInner so a fabricated, already-decoded Prop cannot hide an ABI mistake.
+    Put(parameterType, 0, NameId("ArrayProperty")); Put(parameter, 0x34, int32_t(16)); Put(parameter, 0x78, overlapping);
     Put(overlapping, 8, enumObject); Put(enumObject, 0, NameId("ObjectProperty"));
     Put(overlapping, 0x34, int32_t(8)); Put(overlapping, 0x30, int32_t(1)); Put(overlapping, 0x70, enemyClass);
-    auto array = ue::FindProp(reinterpret_cast<ue::UClass*>(signatureFunction), "Count", true);
-    Check(array.Is(Kind::Array, 16), "strong enemy array descriptor");
-    Check(ue::ArrayInner(array).Is(Kind::Object, 8) && ue::ArrayInner(array).inner == enemyClass, "strong enemy array element class");
+    auto reflected = [&] { return ue::FindProp(reinterpret_cast<ue::UClass*>(signatureFunction), "Count", true); };
+    auto inner = [&] { return ue::ArrayInner(reflected()); };
+    std::array<uint8_t, 0x90> decoy{};
+    Put(decoy.data(), 8, parameterType); Put(decoy.data(), 0x34, int32_t(16)); Put(decoy.data(), 0x30, int32_t(1));
+    for (const void* unused : {static_cast<const void*>(nullptr), static_cast<const void*>(decoy.data())}) {
+        Put(parameter, 0x70, unused);
+        Check(reflected().Is(Kind::Array, 16), "strong enemy array descriptor");
+        Check(inner().Is(Kind::Object, 8) && inner().inner == enemyClass,
+            "array Inner at 0x78 resolves strong enemy class with null or decoy at 0x70");
+    }
     Put(enumObject, 0, NameId("WeakObjectProperty"));
-    Check(!ue::ArrayInner(array).Is(Kind::Object, 8), "weak corpse array cannot substitute for strong enemy ownership");
+    Check(inner().kind == Kind::Unknown && !inner().Is(Kind::Object, 8), "weak corpse array cannot substitute for strong enemy ownership");
+    Put(enumObject, 0, NameId("NameProperty")); Put(overlapping, 0x70, static_cast<const void*>(nullptr));
+    Check(inner().Is(Kind::Name, 8), "actor and spawn-info tag arrays resolve Name8 elements");
+    Put(enumObject, 0, NameId("StructProperty")); Put(overlapping, 0x34, int32_t(48));
+    Put(vectorStruct, 0x18, NameId("EnemyTelekinesisObjectData")); Put(overlapping, 0x70, vectorStruct);
+    Check(inner().Is(Kind::Struct, 48) && inner().inner == vectorStruct &&
+        ue::Name(static_cast<const ue::UObject*>(inner().inner)) == "EnemyTelekinesisObjectData",
+        "spawn-info array resolves Struct48 and its exact struct identity");
+    Put(overlapping, 0x34, int32_t(24));
+    Check(!inner().Is(Kind::Struct, 48), "wrong array element size rejected");
+    Put(overlapping, 0x34, int32_t(48)); Put(overlapping, 0x30, int32_t(2));
+    Check(!inner().Is(Kind::Struct, 48), "non-scalar array element rejected");
+    Put(overlapping, 0x30, int32_t(1)); Put(enumObject, 0, NameId("FloatProperty"));
+    Check(inner().kind == Kind::Unknown, "unsupported element type cannot pass typed array validation");
+    Put(enumObject, 0, NameId("StructProperty"));
+    Put(parameter, 0x70, overlapping); Put(parameter, 0x78, static_cast<const void*>(nullptr));
+    Check(!inner(), "missing Inner fails without falling back to a plausible 0x70 pointer");
+    Put(parameter, 0x78, overlapping); Put(parameter, 0x34, int32_t(8));
+    Check(!inner(), "wrong array descriptor size rejected");
+    Put(parameter, 0x34, int32_t(16)); Put(parameter, 0x30, int32_t(2));
+    Check(!inner(), "non-scalar array descriptor rejected");
+    Put(parameter, 0x30, int32_t(1)); Put(parameterType, 0, NameId("ObjectProperty"));
+    Put(parameter, 0x34, int32_t(8)); Put(parameter, 0x70, enemyClass);
+    Check(reflected().Is(Kind::Object, 8) && reflected().inner == enemyClass && !inner(),
+        "ordinary object class still resolves at 0x70 and is not an array");
+    Put(parameterType, 0, NameId("StructProperty")); Put(parameter, 0x34, int32_t(48)); Put(parameter, 0x70, vectorStruct);
+    Check(reflected().Is(Kind::Struct, 48) && reflected().inner == vectorStruct,
+        "ordinary struct identity still resolves at 0x70 despite a decoy at 0x78");
+    Put(parameterType, 0, NameId("EnumProperty")); Put(parameter, 0x34, int32_t(1));
+    Put(parameter, 0x70, overlapping); Put(parameter, 0x78, enumObject);
+    Check(reflected().Is(Kind::Enum, 1) && reflected().inner == enumObject,
+        "ordinary enum still resolves UEnum at 0x78 rather than underlying property at 0x70");
     Put(signatureFunction, 0x50, static_cast<ue::UObject*>(nullptr)); Put(signatureFunction, 0x58, int32_t(0));
     Check(ue::Signature(expectedEnemy, "SpawnTest", {}), "exact no-argument cleanup signature accepted");
     puts("Photo/spawn reflection and object-generation tests passed");

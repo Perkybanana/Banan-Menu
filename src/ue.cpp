@@ -30,6 +30,7 @@ constexpr int StructSuper = 0x40, StructChildren = 0x48, StructChildProps = 0x50
 constexpr int UFieldNext = 0x28;
 constexpr int FFieldClass = 0x8, FFieldNext = 0x18, FFieldName = 0x20;
 constexpr int PropFlags = 0x38, PropOffset = 0x44, PropExtra = 0x70; // extra: bool masks / struct / object class
+constexpr int ArrayPropertyInner = 0x78; // FArrayProperty::Inner in the supported engine ABI
 constexpr int FuncFlags = 0xB0;
 } // namespace off
 
@@ -483,6 +484,8 @@ Prop FindProp(const UClass* structOrClass, const char* name, bool uncached)
             if (NameEquals(fieldClass, "BoolProperty")) { // FieldSize, ByteOffset, ByteMask, FieldMask
                 prop.offset += Read<uint8_t>(f, off::PropExtra + 1);
                 prop.boolMask = Read<uint8_t>(f, off::PropExtra + 2);
+            } else if (prop.kind == Prop::Kind::Array) {
+                prop.inner = Read<const void*>(f, off::ArrayPropertyInner);
             } else {
                 prop.inner = Read<const void*>(f, off::PropExtra);
                 // FEnumProperty stores the underlying numeric FProperty followed by its UEnum.

@@ -1,6 +1,6 @@
 # Banan Menu for Hellraiser: Revival
 
-**1.0.0-dev.5 is a development candidate for the Windows Steam game, not a verified stable 1.0.0 release.** Dev.3's panel was nonfunctional. Dev.4 produced invisible/inert enemies, and a Genesis execution after Kill nearby crashed with a missing model. Dev.5 uses the game's full enemy-manager initialization and checks completion/model readiness; gameplay acceptance remains pending. Native episode/chapter selection is supported; arbitrary checkpoint starts are outside the current scope.
+**1.0.0-dev.6 is a development candidate for the Windows Steam game, not a verified stable 1.0.0 release.** Dev.3's panel was nonfunctional. Dev.4 produced invisible/inert enemies, and a Genesis execution after Kill nearby crashed with a missing model. Dev.5 introduced full enemy-manager initialization and completion/model checks but rejected ownership before native spawn dispatch. Dev.6 corrects the reflected array metadata decoding; gameplay acceptance remains pending. Native episode/chapter selection is supported; arbitrary checkpoint starts are outside the current scope.
 
 [Русская версия](README.ru.md) · [Changes](CHANGELOG.md) · [Verification scope](docs/VERIFICATION.md)
 
@@ -37,7 +37,7 @@ ctest --test-dir build -C Release --output-on-failure
 powershell -NoProfile -File scripts/package.ps1 -BuildDirectory build -OutputDirectory packages
 ```
 
-The packager accepts only the normal Release DLL and the documentation/license allowlist. It produces `BananMenu-1.0.0-dev.5-win64.zip` and a JSON hash/size manifest with the source commit and candidate version. Existing targets cause a failure unless `-Force` is explicitly supplied. Compare the extracted DLL's SHA-256 with the manifest before installation. Consult the release notes for the candidate you install and the [recorded scan evidence](docs/VERIFICATION.md). A scan result applies only to its exact recorded DLL hash; a different build needs its own evidence. Scanning does not guarantee absence of all malicious code or establish in-game acceptance.
+The packager accepts only the normal Release DLL and the documentation/license allowlist. It produces `BananMenu-1.0.0-dev.6-win64.zip` and a JSON hash/size manifest with the source commit and candidate version. Existing targets cause a failure unless `-Force` is explicitly supplied. Compare the extracted DLL's SHA-256 with the manifest before installation. Consult the release notes for the candidate you install and the [recorded scan evidence](docs/VERIFICATION.md). A scan result applies only to its exact recorded DLL hash; a different build needs its own evidence. Scanning does not guarantee absence of all malicious code or establish in-game acceptance.
 
 The Windows workflow builds, tests and uploads a development artifact; it does not publish a GitHub Release. For contributions, keep game mutations on the game thread, render from copied snapshots, and add user-facing RU/EN text to `src/lang.cpp`. Run the build and tests above and describe the actual runtime verification performed.
 

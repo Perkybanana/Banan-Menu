@@ -1,6 +1,6 @@
 # Development verification scope
 
-This records the scope of 1.0.0-dev.5 development work as of 2026-10-26. It is not stable-release acceptance.
+This records the scope of 1.0.0-dev.6 development work as of 2026-10-26. It is not stable-release acceptance.
 
 | Area | Evidence and limits |
 | --- | --- |
@@ -11,6 +11,7 @@ This records the scope of 1.0.0-dev.5 development work as of 2026-10-26. It is n
 | Dev.3 native enemy-spawner panel | Failed user acceptance on Chapter5: panel appeared, type list was empty and Spawn had no effect. Read-only diagnosis found null ObjectRef; the panel requires a configured helper Actor/spawners. Build/CI success was separate from gameplay acceptance. Replaced in dev.4. |
 | Dev.4 five-type enemy spawner | Failed gameplay acceptance: Hellghoul and Cultist were invisible/inert despite Controllers. Backstab worked; Genesis execution after Kill nearby crashed. Captured fault dereferenced a null skinned asset. Bare actor construction bypassed game-specific initialization. Replaced in dev.5. |
 | Dev.5 manager initialization | Uses reflected native MakeSpawnInfo/SpawnThreat, selected Blueprint settings preflight, bounded retained native default seed and private actor-tag correlation. Asynchronous status requires native finished-init getter and typed usable model; 15-second timeout, transition/stale/ambiguous failure and duplicate blocking. Kill nearby skips incomplete/model-less targets. Offline tests/build do not execute Unreal. Visibility/AI, all five types, counts 1 and 5, blocked/partial/asynchronous outcomes, transitions, RU/EN and Genesis behavior remain pending user-controlled gameplay acceptance; no universal crash-prevention claim. |
+| Dev.6 array metadata correction | Dev.5 failed the Chapter5 Hellghoul/count-1 attempt at manager ownership preflight, before SpawnThreat dispatch. Class/settings loading precedes that check. Dev.6 corrects reflected array-element decoding, with production-path regressions for strong object, name and struct arrays and unchanged ordinary object/struct/enum behavior. Native initialization, visibility/AI and Genesis acceptance remain pending. |
 | Live-checkpoint teleport | Moves to an existing loaded checkpoint; not a complete story-state start. |
 | Arbitrary checkpoint starts | Outside current scope by owner decision on 2026-10-25; no independent story-state pack/loader is planned. Native episode/chapter selection is retained. |
 | Recoil, attack speed, hand visibility | Removed from the current work scope by owner decision on 2026-10-25. |
